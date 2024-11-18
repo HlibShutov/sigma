@@ -59,7 +59,7 @@ pub fn repo_find(path: PathBuf) -> Result<GitRepository, RepoErrors> {
     }
 }
 
-pub fn object_read(repo: &GitRepository, sha: String) -> Box<dyn GitObject> {
+pub fn object_read(repo: &GitRepository, sha: String) -> GitObject {
     let path = repo.repo_path(&format!("objects/{}/{}", &sha[0..2], &sha[2..]));
     let compressed = fs::read(path).expect("Failed to read object");
     let decompressed =
@@ -80,18 +80,24 @@ pub fn object_read(repo: &GitRepository, sha: String) -> Box<dyn GitObject> {
     let data = decompressed[size_index + 1..].to_vec();
 
     match object_type.as_str() {
-        "blob" => Box::new(GitBlob::new(data)),
-        "commit" => Box::new(GitCommit::new(data)),
-        "tree" => Box::new(GitTree::new(data)),
-        "tag" => Box::new(GitTag::new(data)),
+        "blob" => GitObject::Blob(GitBlob::new(data)),
+        "commit" => GitObject::Commit(GitCommit::new(data)),
+        "tree" => GitObject::Tree(GitTree::new(data)),
+        "tag" => GitObject::Tag(GitTag::new(data)),
         _ => panic!("Failed to recognize object"),
     }
 }
 
-pub fn object_write(repo: &GitRepository, obj: Box<dyn GitObject>) {
+pub fn object_write(repo: &GitRepository, obj: GitObject) {
     let data = obj.serialize();
+    let fmt = match obj {
+        GitObject::Blob(_) => "blob",
+        GitObject::Commit(_) => "commit",
+        GitObject::Tree(_) => "tree",
+        GitObject::Tag(_) => "tag",
+    };
     let header = [
-        obj.fmt().as_bytes(),              // object type (e.g., "blob", "commit")
+        fmt.as_bytes(),              // object type (e.g., "blob", "commit")
         b" ",                              // space separator
         data.len().to_string().as_bytes(), // object size
         &[0],                              // null byte separating the header from the object data

@@ -1,46 +1,51 @@
-pub trait GitObject {
-    fn fmt(&self) -> String;
-    fn serialize(&self) -> &[u8];
-    fn deserialize(&mut self, data: Vec<u8>);
+pub enum GitObject {
+    Blob(GitBlob),
+    Commit(GitCommit),
+    Tree(GitTree),
+    Tag(GitTag),
+}
+
+impl GitObject {
+    pub fn serialize(&self) -> &[u8] {
+        match self {
+            GitObject::Blob(blob) => blob.serialize(),
+            GitObject::Commit(commit) => commit.serialize(),
+            GitObject::Tree(tree) => tree.serialize(),
+            GitObject::Tag(tag) => tag.serialize(),
+        }
+    }
 }
 
 pub struct GitBlob {
-    pub fmt: String,
     data: Vec<u8>,
 }
 
+// not implemented
 pub struct GitCommit {
-    pub fmt: String,
     data: Vec<u8>,
 }
 
+// not implemented
 pub struct GitTree {
-    pub fmt: String,
     data: Vec<u8>,
 }
 
+// not implemented
 pub struct GitTag {
-    pub fmt: String,
     data: Vec<u8>,
 }
 
 impl GitBlob {
     pub fn new(data: Vec<u8>) -> Self {
         Self {
-            fmt: "blob".to_string(),
-            data,
+            data: GitBlob::deserialize(data),
         }
-    }
-}
-impl GitObject for GitBlob {
-    fn fmt(&self) -> String {
-        self.fmt.clone()
     }
     fn serialize(&self) -> &[u8] {
         &self.data
     }
-    fn deserialize(&mut self, data: Vec<u8>) {
-        self.data = data;
+    fn deserialize(data: Vec<u8>) -> Vec<u8> {
+        data
     }
 }
 
@@ -48,20 +53,14 @@ impl GitObject for GitBlob {
 impl GitCommit {
     pub fn new(data: Vec<u8>) -> Self {
         Self {
-            fmt: "commit".to_string(),
-            data,
+            data: GitCommit::deserialize(data),
         }
-    }
-}
-impl GitObject for GitCommit {
-    fn fmt(&self) -> String {
-        self.fmt.clone()
     }
     fn serialize(&self) -> &[u8] {
         &self.data
     }
-    fn deserialize(&mut self, data: Vec<u8>) {
-        self.data = data;
+    fn deserialize(data: Vec<u8>) -> Vec<u8> {
+        data
     }
 }
 
@@ -69,20 +68,14 @@ impl GitObject for GitCommit {
 impl GitTree {
     pub fn new(data: Vec<u8>) -> Self {
         Self {
-            fmt: "commit".to_string(),
-            data,
+            data: GitTree::deserialize(data),
         }
-    }
-}
-impl GitObject for GitTree {
-    fn fmt(&self) -> String {
-        self.fmt.clone()
     }
     fn serialize(&self) -> &[u8] {
         &self.data
     }
-    fn deserialize(&mut self, data: Vec<u8>) {
-        self.data = data;
+    fn deserialize(data: Vec<u8>) -> Vec<u8>{
+        data
     }
 }
 
@@ -90,19 +83,13 @@ impl GitObject for GitTree {
 impl GitTag {
     pub fn new(data: Vec<u8>) -> Self {
         Self {
-            fmt: "commit".to_string(),
-            data,
+            data: GitTag::deserialize(data),
         }
-    }
-}
-impl GitObject for GitTag {
-    fn fmt(&self) -> String {
-        self.fmt.clone()
     }
     fn serialize(&self) -> &[u8] {
         &self.data
     }
-    fn deserialize(&mut self, data: Vec<u8>) {
-        self.data = data;
+    fn deserialize(data: Vec<u8>) -> Vec<u8>{
+        data
     }
 }
