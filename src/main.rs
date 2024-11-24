@@ -1,28 +1,36 @@
-use argparse::{ArgumentParser, Collect, Store};
+use clap::{Parser, Subcommand};
+use sigma::{cmd_cat_file, cmd_init, cmd_hash_object};
 
-use sigma::cmd_init;
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[command(subcommand)]
+    cmd: Commands
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum Commands {
+    Init {
+        path: Option<String>
+    },
+    CatFile {
+        file: String,
+    },
+    HashObject {
+        object: String,
+        object_type: String,
+        #[arg(short = 'w', long = "write")]
+        write: bool,
+    },
+}
 
 fn main() {
-    let mut command: String = Default::default();
-    let mut args: Vec<String> = Default::default();
-    {
-        let mut parser = ArgumentParser::new();
-        parser.set_description("Simplified Implementation of Git Mechanics and Architecture");
+    let args = Args::parse();
+    println!("{:?}", args.cmd);
 
-        parser
-            .refer(&mut command)
-            .add_argument("command", Store, "Command to run");
-        parser
-            .refer(&mut args)
-            .add_argument("args", Collect, "Arguments");
-
-        parser.parse_args().unwrap();
-    }
-    println!("command: {command}");
-    println!("args: {args:?}");
-
-    match command.as_str() {
-        "init" => cmd_init(args),
-        _ => panic!("Unknown command"),
+    match args.cmd {
+        Commands::Init { path } => cmd_init(path),
+        Commands::CatFile { file } => cmd_cat_file(file),
+        Commands::HashObject { object, write, object_type }=> cmd_hash_object(object, object_type, write),
     }
 }

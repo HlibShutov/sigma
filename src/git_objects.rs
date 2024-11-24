@@ -14,6 +14,14 @@ impl GitObject {
             GitObject::Tag(tag) => tag.serialize(),
         }
     }
+    pub fn deserialize(&self) -> Vec<u8> {
+        match self {
+            GitObject::Blob(blob) => GitBlob::deserialize(blob.data.clone()),
+            GitObject::Commit(commit) => GitCommit::deserialize(commit.data.clone()),
+            GitObject::Tree(tree) => GitTree::deserialize(tree.data.clone()),
+            GitObject::Tag(tag) => GitTag::deserialize(tag.data.clone()),
+        }
+    }
 }
 
 pub struct GitBlob {

@@ -6,6 +6,7 @@ pub enum RepoErrors {
     ConfigFileError,
     ConfigError,
     FormatVersionError,
+    NotFound,
 }
 
 pub struct GitRepository {

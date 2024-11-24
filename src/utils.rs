@@ -52,14 +52,14 @@ pub fn repo_find(path: PathBuf) -> Result<GitRepository, RepoErrors> {
         Ok(GitRepository::new(path, false)?)
     } else {
         if path.parent() == Some(&path) {
-            Err(RepoErrors::FormatVersionError)
+            Err(RepoErrors::NotFound)
         } else {
             repo_find(path.parent().expect("There is no repo").to_path_buf())
         }
     }
 }
 
-pub fn object_read(repo: &GitRepository, sha: String) -> GitObject {
+pub fn object_read(repo: GitRepository, sha: String) -> GitObject {
     let path = repo.repo_path(&format!("objects/{}/{}", &sha[0..2], &sha[2..]));
     let compressed = fs::read(path).expect("Failed to read object");
     let decompressed =
@@ -88,7 +88,7 @@ pub fn object_read(repo: &GitRepository, sha: String) -> GitObject {
     }
 }
 
-pub fn object_write(repo: &GitRepository, obj: GitObject) {
+pub fn object_write(repo: Option<GitRepository>, obj: GitObject) -> String {
     let data = obj.serialize();
     let fmt = match obj {
         GitObject::Blob(_) => "blob",
@@ -108,14 +108,19 @@ pub fn object_write(repo: &GitRepository, obj: GitObject) {
     hasher.update(&result);
     let hash = hasher.finalize();
     let hex_result = hex::encode(hash);
-    let compressed = compress_to_vec_zlib(&result, 6);
 
-    let path = repo.repo_path(
-        format!("objects/{}/{}", &hex_result[0..2], &hex_result[2..])
-            .as_str()
-            .into(),
-    );
-    fs::create_dir_all(path.parent().unwrap()).expect("Failded to create object file parents");
-    let mut file = File::create(path).expect("Failed to create object file");
-    file.write_all(&compressed).expect("Failed to write object");
+    if let Some(repo) = repo {
+        let compressed = compress_to_vec_zlib(&result, 6);
+
+        let path = repo.repo_path(
+            format!("objects/{}/{}", &hex_result[0..2], &hex_result[2..])
+                .as_str()
+                .into(),
+        );
+        fs::create_dir_all(path.parent().unwrap()).expect("Failded to create object file parents");
+        let mut file = File::create(path).expect("Failed to create object file");
+        file.write_all(&compressed).expect("Failed to write object");
+    }
+
+    hex_result
 }
