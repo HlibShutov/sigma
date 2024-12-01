@@ -7,6 +7,7 @@ pub mod git_repository;
 pub mod utils;
 
 use utils::object_write;
+use utils::read_raw;
 use utils::{object_read, repo_find};
 use git_objects::*;
 
@@ -30,14 +31,16 @@ pub fn cmd_init(path: Option<String>) {
 
 pub fn cmd_cat_file(obj_args: String) {
     let repo_path = env::current_dir().expect("failed to get current dir");
-    let obj_name = obj_args.as_str();
 
     let repo = match repo_find(repo_path) {
         Ok(repo) => repo,
         Err(RepoErrors::NotFound) => panic!("Failed to find repo"),
         _ => panic!("Unknown error"),
     };
-    let obj = object_read(repo, obj_name.to_string());
+    let path = repo.repo_path(&format!("objects/{}/{}", &obj_args[0..2], &obj_args[2..]));
+    let raw = read_raw(path);
+    println!("{:?}", raw);
+    let obj = object_read(raw);
     println!("{}", String::from_utf8(obj.deserialize()).unwrap());
 }
 
