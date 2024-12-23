@@ -1,17 +1,17 @@
 use clap::{Parser, Subcommand};
-use sigma::{cmd_cat_file, cmd_init, cmd_hash_object};
+use sigma::*;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     #[command(subcommand)]
-    cmd: Commands
+    cmd: Commands,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 enum Commands {
     Init {
-        path: Option<String>
+        path: Option<String>,
     },
     CatFile {
         file: String,
@@ -22,6 +22,9 @@ enum Commands {
         #[arg(short = 'w', long = "write")]
         write: bool,
     },
+    Log {
+        object: String,
+    },
 }
 
 fn main() {
@@ -31,6 +34,11 @@ fn main() {
     match args.cmd {
         Commands::Init { path } => cmd_init(path),
         Commands::CatFile { file } => cmd_cat_file(file),
-        Commands::HashObject { object, write, object_type }=> cmd_hash_object(object, object_type, write),
+        Commands::HashObject {
+            object,
+            write,
+            object_type,
+        } => cmd_hash_object(object, object_type, write),
+        Commands::Log { object } => cmd_log(object),
     }
 }

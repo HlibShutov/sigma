@@ -6,10 +6,12 @@ pub mod git_objects;
 pub mod git_repository;
 pub mod utils;
 
-use utils::object_write;
-use utils::read_raw;
-use utils::{object_read, repo_find};
 use git_objects::*;
+use utils::object_write;
+use utils::parse_key_value;
+use utils::read_raw;
+use utils::write_key_value;
+use utils::{object_read, repo_find};
 
 use crate::git_repository::RepoErrors;
 use crate::utils::repo_create;
@@ -70,4 +72,33 @@ pub fn cmd_hash_object(path: String, object_type: String, write: bool) {
 
     let sha = object_write(repo, obj);
     println!("{}", sha);
+}
+
+pub fn cmd_log(object: String) {
+    let repo_path = env::current_dir().expect("failed to get current dir");
+
+    let repo = match repo_find(repo_path) {
+        Ok(repo) => repo,
+        Err(RepoErrors::NotFound) => panic!("Failed to find repo"),
+        _ => panic!("Unknown error"),
+    };
+
+    let mut current_object = object;
+
+    loop {
+        let path = repo.repo_path(&format!("objects/{}/{}", &current_object[0..2], &current_object[2..]));
+        let raw = read_raw(path);
+        let obj = object_read(raw);
+
+        let parsed_data = parse_key_value(obj.deserialize(), None);
+        obj.serialize();
+        println!("{}", String::from_utf8(obj.serialize()).unwrap());
+        println!("^^^^^^^^^^^");
+
+        if let Some(parent) = parsed_data.get("parent") {
+            current_object = parent.clone();
+        } else {
+            break;
+        }
+    }
 }

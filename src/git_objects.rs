@@ -1,3 +1,7 @@
+use indexmap::IndexMap;
+
+use crate::utils::{parse_key_value, write_key_value};
+
 pub enum GitObject {
     Blob(GitBlob),
     Commit(GitCommit),
@@ -6,7 +10,7 @@ pub enum GitObject {
 }
 
 impl GitObject {
-    pub fn serialize(&self) -> &[u8] {
+    pub fn serialize(&self) -> Vec<u8> {
         match self {
             GitObject::Blob(blob) => blob.serialize(),
             GitObject::Commit(commit) => commit.serialize(),
@@ -28,9 +32,9 @@ pub struct GitBlob {
     data: Vec<u8>,
 }
 
-// not implemented
 pub struct GitCommit {
     data: Vec<u8>,
+    kv: IndexMap<String, String>,
 }
 
 // not implemented
@@ -49,26 +53,28 @@ impl GitBlob {
             data: GitBlob::deserialize(data),
         }
     }
-    fn serialize(&self) -> &[u8] {
-        &self.data
+    fn serialize(&self) -> Vec<u8> {
+        self.data.clone()
     }
     fn deserialize(data: Vec<u8>) -> Vec<u8> {
         data
     }
 }
 
-// not implemented
 impl GitCommit {
     pub fn new(data: Vec<u8>) -> Self {
+        let data = String::from_utf8(data).unwrap().trim_end().to_string().into_bytes();
         Self {
-            data: GitCommit::deserialize(data),
+            data: GitCommit::deserialize(data.clone()),
+            kv: parse_key_value(data, None),
         }
     }
-    fn serialize(&self) -> &[u8] {
-        &self.data
+    fn serialize(&self) -> Vec<u8> {
+        write_key_value(self.kv.clone()).into_bytes()
     }
-    fn deserialize(data: Vec<u8>) -> Vec<u8> {
-        data
+    pub fn deserialize(raw: Vec<u8>) -> Vec<u8> {
+        let raw = String::from_utf8(raw).unwrap().trim_end().to_string().into_bytes();
+        write_key_value(parse_key_value(raw, None)).into_bytes()
     }
 }
 
@@ -79,10 +85,10 @@ impl GitTree {
             data: GitTree::deserialize(data),
         }
     }
-    fn serialize(&self) -> &[u8] {
-        &self.data
+    fn serialize(&self) -> Vec<u8> {
+        self.data.clone()
     }
-    fn deserialize(data: Vec<u8>) -> Vec<u8>{
+    fn deserialize(data: Vec<u8>) -> Vec<u8> {
         data
     }
 }
@@ -94,10 +100,10 @@ impl GitTag {
             data: GitTag::deserialize(data),
         }
     }
-    fn serialize(&self) -> &[u8] {
-        &self.data
+    fn serialize(&self) -> Vec<u8> {
+        self.data.clone()
     }
-    fn deserialize(data: Vec<u8>) -> Vec<u8>{
+    fn deserialize(data: Vec<u8>) -> Vec<u8> {
         data
     }
 }
