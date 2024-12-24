@@ -86,7 +86,11 @@ pub fn cmd_log(object: String) {
     let mut current_object = object;
 
     loop {
-        let path = repo.repo_path(&format!("objects/{}/{}", &current_object[0..2], &current_object[2..]));
+        let path = repo.repo_path(&format!(
+            "objects/{}/{}",
+            &current_object[0..2],
+            &current_object[2..]
+        ));
         let raw = read_raw(path);
         let obj = object_read(raw);
 

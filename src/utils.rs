@@ -200,8 +200,68 @@ pub fn write_key_value(hash_map: IndexMap<String, String>) -> String {
     result
 }
 
+fn parse_tree_leaf(raw: Vec<u8>) -> (usize, TreeLeaf) {
+    let space = raw
+        .iter()
+        .position(|&r| r == 32)
+        .expect("failed to read object");
+    let null = raw
+        .iter()
+        .position(|&r| r == 0)
+        .expect("failed to read object");
+
+    let mode = raw[..space].to_vec();
+    let path = String::from_utf8(raw[space + 1..null].to_vec()).expect("failed to read object");
+    let sha = String::from_utf8(raw[null + 1..null + 41].to_vec()).expect("failed to read object");
+
+    (null + 41, TreeLeaf { mode, path, sha })
+}
+
+pub fn parse_tree(raw: Vec<u8>) -> Vec<TreeLeaf> {
+    let mut current = 0;
+    let mut leafs = Vec::new();
+    while current < raw.len() {
+        println!("{:?}", current);
+        let (end, leaf) = parse_tree_leaf(raw[current..].to_vec());
+        leafs.push(leaf);
+        current += end;
+    }
+
+    leafs
+}
+
+pub fn write_tree(mut leafs: Vec<TreeLeaf>) -> Vec<u8> {
+    let mut result = Vec::new();
+    leafs.sort_by(|a, b| {
+        let a_path = if a.mode[0..2] == [49, 48] {
+            a.path.clone()
+        } else {
+            a.path.clone() + "/"
+        };
+
+        let b_path = if b.mode[0..2] == [49, 48] {
+            b.path.clone()
+        } else {
+            b.path.clone() + "/"
+        };
+        a_path.cmp(&b_path)
+    });
+
+    leafs.iter().for_each(|leaf| {
+        result.extend(&leaf.mode);
+        result.push(32);
+        result.extend(leaf.path.bytes());
+        result.push(0);
+        result.extend(leaf.sha.bytes());
+    });
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
+    use std::result;
+
     use super::*;
 
     #[test]
@@ -369,5 +429,69 @@ Create first draft",
         println!("{}", result);
         println!("{}", expected);
         assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn parses_tree_leaf() {
+        let raw = vec![
+            48, 52, 48, 48, 48, 48, 32, 116, 101, 115, 116, 46, 114, 115, 00, 56, 57, 52, 97, 52,
+            52, 99, 99, 48, 54, 54, 97, 48, 50, 55, 52, 54, 53, 99, 100, 50, 54, 100, 54, 51, 52,
+            57, 52, 56, 100, 53, 54, 100, 49, 51, 97, 102, 57, 97, 102,
+        ];
+        let (_, result) = parse_tree_leaf(raw);
+        let expected = TreeLeaf {
+            mode: vec![48, 52, 48, 48, 48, 48],
+            path: "test.rs".to_string(),
+            sha: "894a44cc066a027465cd26d634948d56d13af9af".to_string(),
+        };
+        assert_eq!(expected, result);
+    }
+
+    #[test]
+    fn parses_tree() {
+        let raw = vec![
+            48, 52, 48, 48, 48, 48, 32, 116, 101, 115, 116, 46, 114, 115, 00, 56, 57, 52, 97, 52,
+            52, 99, 99, 48, 54, 54, 97, 48, 50, 55, 52, 54, 53, 99, 100, 50, 54, 100, 54, 51, 52,
+            57, 52, 56, 100, 53, 54, 100, 49, 51, 97, 102, 57, 97, 102, 48, 52, 48, 48, 48, 48, 32,
+            116, 101, 115, 116, 46, 114, 115, 00, 56, 57, 52, 97, 52, 52, 99, 99, 48, 54, 54, 97,
+            48, 50, 55, 52, 54, 53, 99, 100, 50, 54, 100, 54, 51, 52, 57, 52, 56, 100, 53, 54, 100,
+            49, 51, 97, 102, 57, 97, 102,
+        ];
+        let result = parse_tree(raw);
+        let expected = TreeLeaf {
+            mode: vec![48, 52, 48, 48, 48, 48],
+            path: "test.rs".to_string(),
+            sha: "894a44cc066a027465cd26d634948d56d13af9af".to_string(),
+        };
+        let expected1 = TreeLeaf {
+            mode: vec![48, 52, 48, 48, 48, 48],
+            path: "test.rs".to_string(),
+            sha: "894a44cc066a027465cd26d634948d56d13af9af".to_string(),
+        };
+        assert_eq!(vec![expected, expected1], result);
+    }
+
+    #[test]
+    fn writes_tree() {
+        let raw = vec![
+            48, 52, 48, 48, 48, 48, 32, 116, 101, 115, 116, 46, 114, 115, 00, 56, 57, 52, 97, 52,
+            52, 99, 99, 48, 54, 54, 97, 48, 50, 55, 52, 54, 53, 99, 100, 50, 54, 100, 54, 51, 52,
+            57, 52, 56, 100, 53, 54, 100, 49, 51, 97, 102, 57, 97, 102, 48, 52, 48, 48, 48, 48, 32,
+            116, 101, 115, 116, 46, 114, 115, 00, 56, 57, 52, 97, 52, 52, 99, 99, 48, 54, 54, 97,
+            48, 50, 55, 52, 54, 53, 99, 100, 50, 54, 100, 54, 51, 52, 57, 52, 56, 100, 53, 54, 100,
+            49, 51, 97, 102, 57, 97, 102,
+        ];
+        let leaf1 = TreeLeaf {
+            mode: vec![48, 52, 48, 48, 48, 48],
+            path: "test.rs".to_string(),
+            sha: "894a44cc066a027465cd26d634948d56d13af9af".to_string(),
+        };
+        let leaf2 = TreeLeaf {
+            mode: vec![48, 52, 48, 48, 48, 48],
+            path: "test.rs".to_string(),
+            sha: "894a44cc066a027465cd26d634948d56d13af9af".to_string(),
+        };
+        let result = write_tree(vec![leaf1, leaf2]);
+        assert_eq!(raw, result);
     }
 }

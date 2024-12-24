@@ -1,6 +1,13 @@
 use indexmap::IndexMap;
 
-use crate::utils::{parse_key_value, write_key_value};
+use crate::utils::*;
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct TreeLeaf {
+    pub mode: Vec<u8>,
+    pub path: String,
+    pub sha: String,
+}
 
 pub enum GitObject {
     Blob(GitBlob),
@@ -37,9 +44,9 @@ pub struct GitCommit {
     kv: IndexMap<String, String>,
 }
 
-// not implemented
 pub struct GitTree {
     data: Vec<u8>,
+    leafs: Vec<TreeLeaf>,
 }
 
 // not implemented
@@ -63,7 +70,11 @@ impl GitBlob {
 
 impl GitCommit {
     pub fn new(data: Vec<u8>) -> Self {
-        let data = String::from_utf8(data).unwrap().trim_end().to_string().into_bytes();
+        let data = String::from_utf8(data)
+            .unwrap()
+            .trim_end()
+            .to_string()
+            .into_bytes();
         Self {
             data: GitCommit::deserialize(data.clone()),
             kv: parse_key_value(data, None),
@@ -73,23 +84,27 @@ impl GitCommit {
         write_key_value(self.kv.clone()).into_bytes()
     }
     pub fn deserialize(raw: Vec<u8>) -> Vec<u8> {
-        let raw = String::from_utf8(raw).unwrap().trim_end().to_string().into_bytes();
+        let raw = String::from_utf8(raw)
+            .unwrap()
+            .trim_end()
+            .to_string()
+            .into_bytes();
         write_key_value(parse_key_value(raw, None)).into_bytes()
     }
 }
 
-// not implemented
 impl GitTree {
     pub fn new(data: Vec<u8>) -> Self {
         Self {
-            data: GitTree::deserialize(data),
+            data: GitTree::deserialize(data.clone()),
+            leafs: parse_tree(data),
         }
     }
     fn serialize(&self) -> Vec<u8> {
-        self.data.clone()
+        write_tree(self.leafs.clone())
     }
     fn deserialize(data: Vec<u8>) -> Vec<u8> {
-        data
+        write_tree(parse_tree(data))
     }
 }
 
