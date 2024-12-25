@@ -7,15 +7,28 @@ pub mod git_repository;
 pub mod utils;
 
 use git_objects::*;
+use git_repository::GitRepository;
 use utils::object_write;
 use utils::parse_key_value;
+use utils::parse_tree;
 use utils::read_raw;
-use utils::write_key_value;
+use utils::write_tree;
 use utils::{object_read, repo_find};
 
 use crate::git_repository::RepoErrors;
 use crate::utils::repo_create;
 
+fn get_repo() -> GitRepository {
+    let repo_path = env::current_dir().expect("failed to get current dir");
+
+    let repo = match repo_find(repo_path) {
+        Ok(repo) => repo,
+        Err(RepoErrors::NotFound) => panic!("Failed to find repo"),
+        _ => panic!("Unknown error"),
+    };
+
+    repo
+}
 pub fn cmd_init(path: Option<String>) {
     let repo_path = if let Some(path) = path {
         PathBuf::from(path.as_str())
@@ -32,13 +45,7 @@ pub fn cmd_init(path: Option<String>) {
 }
 
 pub fn cmd_cat_file(obj_args: String) {
-    let repo_path = env::current_dir().expect("failed to get current dir");
-
-    let repo = match repo_find(repo_path) {
-        Ok(repo) => repo,
-        Err(RepoErrors::NotFound) => panic!("Failed to find repo"),
-        _ => panic!("Unknown error"),
-    };
+    let repo = get_repo();
     let path = repo.repo_path(&format!("objects/{}/{}", &obj_args[0..2], &obj_args[2..]));
     let raw = read_raw(path);
     println!("{:?}", raw);
@@ -59,7 +66,7 @@ pub fn cmd_hash_object(path: String, object_type: String, write: bool) {
         None
     };
 
-    let full_path: PathBuf = current_dir.join(&path);
+    // let full_path: PathBuf = current_dir.join(&path);
     let data = fs::read(&path).expect("Failed to read object");
 
     let obj = match object_type.as_str() {
@@ -75,14 +82,7 @@ pub fn cmd_hash_object(path: String, object_type: String, write: bool) {
 }
 
 pub fn cmd_log(object: String) {
-    let repo_path = env::current_dir().expect("failed to get current dir");
-
-    let repo = match repo_find(repo_path) {
-        Ok(repo) => repo,
-        Err(RepoErrors::NotFound) => panic!("Failed to find repo"),
-        _ => panic!("Unknown error"),
-    };
-
+    let repo = get_repo();
     let mut current_object = object;
 
     loop {
@@ -95,7 +95,6 @@ pub fn cmd_log(object: String) {
         let obj = object_read(raw);
 
         let parsed_data = parse_key_value(obj.deserialize(), None);
-        obj.serialize();
         println!("{}", String::from_utf8(obj.serialize()).unwrap());
         println!("^^^^^^^^^^^");
 
@@ -105,4 +104,34 @@ pub fn cmd_log(object: String) {
             break;
         }
     }
+}
+
+pub fn cmd_ls_tree(object: String, recursive: bool) {
+    let repo = get_repo();
+
+    let path = repo.repo_path(&format!("objects/{}/{}", &object[0..2], &object[2..]));
+    let raw = read_raw(path);
+    let obj = object_read(raw.clone());
+    let leafs = parse_tree(obj.deserialize());
+
+    leafs.iter().for_each(|leaf| {
+        let leaf_type = match leaf.mode[0..2] {
+            [48, 52] => "tree",
+            [49, 48] => "blob",
+            [49, 50] => "blob",
+            [49, 54] => "commit",
+            _ => panic!("Unknown object type"),
+        };
+        if leaf.mode[0..2] == [48, 52] && recursive {
+            cmd_ls_tree(leaf.sha.clone(), recursive)
+        } else {
+            println!(
+                "{} {} {} {}",
+                String::from_utf8(leaf.mode.clone()).unwrap(),
+                leaf_type,
+                leaf.sha,
+                leaf.path
+            )
+        }
+    });
 }

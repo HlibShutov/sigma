@@ -25,6 +25,11 @@ enum Commands {
     Log {
         object: String,
     },
+    LsTree {
+        object: String,
+        #[arg(short = 'r', long = "recursive")]
+        recursive: bool,
+    },
 }
 
 fn main() {
@@ -40,5 +45,6 @@ fn main() {
             object_type,
         } => cmd_hash_object(object, object_type, write),
         Commands::Log { object } => cmd_log(object),
+        Commands::LsTree { object, recursive } => cmd_ls_tree(object, recursive),
     }
 }
