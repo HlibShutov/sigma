@@ -271,6 +271,26 @@ pub fn write_tree(mut leafs: Vec<TreeLeaf>) -> Vec<u8> {
     result
 }
 
+pub fn tree_checkout(repo: GitRepository, tree: GitTree, path: PathBuf) {
+    tree.leafs.iter().for_each(|leaf| {
+        let leaf_path = repo.repo_path(&format!("objects/{}/{}", &leaf.sha[0..2], &leaf.sha[2..]));
+        let raw = read_raw(leaf_path);
+        let obj = object_read(raw);
+        let new_path = path.join(&leaf.path);
+        println!("{:?}", new_path);
+        match obj {
+            GitObject::Tree(tree_obj) => {
+                fs::create_dir(&new_path).expect("Failed to create dir");
+                tree_checkout(repo.clone(), tree_obj, new_path);
+            }
+            GitObject::Blob(blob_obj) => {
+                fs::write(new_path, blob_obj.serialize()).expect("Failed to write file");
+            }
+            _ => panic!("Invalid tree"),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

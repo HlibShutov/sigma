@@ -9,6 +9,7 @@ pub enum RepoErrors {
     NotFound,
 }
 
+#[derive(Clone)]
 pub struct GitRepository {
     worktree: PathBuf,
     gitdir: PathBuf,

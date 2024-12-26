@@ -41,12 +41,12 @@ pub struct GitBlob {
 
 pub struct GitCommit {
     data: Vec<u8>,
-    kv: IndexMap<String, String>,
+    pub kv: IndexMap<String, String>,
 }
 
 pub struct GitTree {
     data: Vec<u8>,
-    leafs: Vec<TreeLeaf>,
+    pub leafs: Vec<TreeLeaf>,
 }
 
 // not implemented
@@ -60,7 +60,7 @@ impl GitBlob {
             data: GitBlob::deserialize(data),
         }
     }
-    fn serialize(&self) -> Vec<u8> {
+    pub fn serialize(&self) -> Vec<u8> {
         self.data.clone()
     }
     fn deserialize(data: Vec<u8>) -> Vec<u8> {

@@ -8,12 +8,7 @@ pub mod utils;
 
 use git_objects::*;
 use git_repository::GitRepository;
-use utils::object_write;
-use utils::parse_key_value;
-use utils::parse_tree;
-use utils::read_raw;
-use utils::write_tree;
-use utils::{object_read, repo_find};
+use utils::*;
 
 use crate::git_repository::RepoErrors;
 use crate::utils::repo_create;
@@ -134,4 +129,28 @@ pub fn cmd_ls_tree(object: String, recursive: bool) {
             )
         }
     });
+}
+
+pub fn cmd_checkout(commit: String, path: String) {
+    let repo = get_repo();
+    let commit_path = repo.repo_path(&format!("objects/{}/{}", &commit[0..2], &commit[2..]));
+    let raw = read_raw(commit_path);
+    let obj = object_read(raw);
+    let commit_obj = match obj {
+        GitObject::Commit(commit) => commit,
+        _ => panic!("Not a commit"),
+    };
+
+    let tree_path = repo.repo_path(&format!(
+        "objects/{}/{}",
+        &commit_obj.kv["tree"][0..2],
+        &commit_obj.kv["tree"][2..]
+    ));
+    let tree_raw = read_raw(tree_path);
+    let tree = match object_read(tree_raw) {
+        GitObject::Tree(tree) => tree,
+        _ => panic!("corrupted commit"),
+    };
+
+    tree_checkout(repo, tree, PathBuf::from(path));
 }

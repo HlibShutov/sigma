@@ -30,6 +30,10 @@ enum Commands {
         #[arg(short = 'r', long = "recursive")]
         recursive: bool,
     },
+    Checkout {
+        commit: String,
+        path: String,
+    },
 }
 
 fn main() {
@@ -46,5 +50,6 @@ fn main() {
         } => cmd_hash_object(object, object_type, write),
         Commands::Log { object } => cmd_log(object),
         Commands::LsTree { object, recursive } => cmd_ls_tree(object, recursive),
+        Commands::Checkout { commit, path } => cmd_checkout(commit, path),
     }
 }
