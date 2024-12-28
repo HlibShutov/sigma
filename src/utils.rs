@@ -5,7 +5,7 @@ use ini::Ini;
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 use sha1::{Digest, Sha1};
-use std::fs::{self, exists, File};
+use std::fs::{self, exists, DirEntry, File};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -289,6 +289,48 @@ pub fn tree_checkout(repo: GitRepository, tree: GitTree, path: PathBuf) {
             _ => panic!("Invalid tree"),
         }
     })
+}
+
+pub fn read_reference(repo: GitRepository, path: PathBuf) -> String {
+    let content = if let Ok(ref_content) = fs::read(path) {
+        ref_content
+    } else {
+        return "".to_string();
+    };
+    match content[0..5] {
+        [114, 101, 102, 58, 32] => read_reference(
+            repo,
+            PathBuf::from(String::from_utf8(content[5..].to_vec()).expect("Invalid ref")),
+        ),
+        _ => String::from_utf8(content[5..].to_vec()).unwrap(),
+    }
+}
+
+pub fn list_refs(repo: GitRepository, path: PathBuf) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+
+    fs::read_dir(path).unwrap().for_each(|entry| {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            result.append(&mut list_refs(repo.clone(), entry.path()));
+        } else {
+            result.push((
+                entry
+                    .path()
+                    .to_str()
+                    .unwrap()
+                    .split(".git/")
+                    .nth(1)
+                    .unwrap()
+                    .to_string(),
+                read_reference(repo.clone(), entry.path())
+                    .trim()
+                    .to_string(),
+            ))
+        }
+    });
+
+    result
 }
 
 #[cfg(test)]

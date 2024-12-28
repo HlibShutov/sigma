@@ -154,3 +154,11 @@ pub fn cmd_checkout(commit: String, path: String) {
 
     tree_checkout(repo, tree, PathBuf::from(path));
 }
+
+pub fn cmd_show_ref() {
+    let repo = get_repo();
+    let path = repo.repo_path("refs");
+    let refs = list_refs(repo, path);
+    refs.iter()
+        .for_each(|entry| println!("{} {}", entry.1, entry.0))
+}

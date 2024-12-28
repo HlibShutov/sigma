@@ -34,6 +34,7 @@ enum Commands {
         commit: String,
         path: String,
     },
+    ShowRef,
 }
 
 fn main() {
@@ -51,5 +52,6 @@ fn main() {
         Commands::Log { object } => cmd_log(object),
         Commands::LsTree { object, recursive } => cmd_ls_tree(object, recursive),
         Commands::Checkout { commit, path } => cmd_checkout(commit, path),
+        Commands::ShowRef => cmd_show_ref(),
     }
 }
