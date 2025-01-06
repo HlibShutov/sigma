@@ -45,7 +45,7 @@ pub fn cmd_cat_file(obj_args: String) {
     let raw = read_raw(path);
     println!("{:?}", raw);
     let obj = object_read(raw);
-    println!("{}", String::from_utf8(obj.deserialize()).unwrap());
+    println!("{}", String::from_utf8(obj.serialize()).unwrap());
 }
 
 pub fn cmd_hash_object(path: String, object_type: String, write: bool) {
@@ -78,7 +78,7 @@ pub fn cmd_hash_object(path: String, object_type: String, write: bool) {
 
 pub fn cmd_log(object: String) {
     let repo = get_repo();
-    let mut current_object = object;
+    let mut current_object = find_object(object);
 
     loop {
         let path = repo.repo_path(&format!(
@@ -103,10 +103,13 @@ pub fn cmd_log(object: String) {
 
 pub fn cmd_ls_tree(object: String, recursive: bool) {
     let repo = get_repo();
+    // let object = find_object(object);
 
+    println!("{}", object);
     let path = repo.repo_path(&format!("objects/{}/{}", &object[0..2], &object[2..]));
     let raw = read_raw(path);
     let obj = object_read(raw.clone());
+    println!("{:?}", obj);
     let leafs = parse_tree(obj.deserialize());
 
     leafs.iter().for_each(|leaf| {
@@ -133,6 +136,7 @@ pub fn cmd_ls_tree(object: String, recursive: bool) {
 
 pub fn cmd_checkout(commit: String, path: String) {
     let repo = get_repo();
+    let commit = find_object(commit);
     let commit_path = repo.repo_path(&format!("objects/{}/{}", &commit[0..2], &commit[2..]));
     let raw = read_raw(commit_path);
     let obj = object_read(raw);
@@ -161,4 +165,13 @@ pub fn cmd_show_ref() {
     let refs = list_refs(repo, path);
     refs.iter()
         .for_each(|entry| println!("{} {}", entry.1, entry.0))
+}
+
+pub fn cmd_tag(name: String, write_object: bool, sha: String) {
+    let repo = get_repo();
+    if write_object {
+        create_tag_object(repo, name, sha);
+    } else {
+        create_ref(repo, name, sha);
+    };
 }

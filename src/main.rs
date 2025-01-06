@@ -35,6 +35,13 @@ enum Commands {
         path: String,
     },
     ShowRef,
+    Tag {
+        name: String,
+        #[arg(short = 'a')]
+        write: bool,
+        #[arg(default_value = "HEAD")]
+        object: String,
+    },
 }
 
 fn main() {
@@ -53,5 +60,10 @@ fn main() {
         Commands::LsTree { object, recursive } => cmd_ls_tree(object, recursive),
         Commands::Checkout { commit, path } => cmd_checkout(commit, path),
         Commands::ShowRef => cmd_show_ref(),
+        Commands::Tag {
+            name,
+            write,
+            object,
+        } => cmd_tag(name, write, object),
     }
 }

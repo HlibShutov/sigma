@@ -9,6 +9,7 @@ pub struct TreeLeaf {
     pub sha: String,
 }
 
+#[derive(Clone, Debug)]
 pub enum GitObject {
     Blob(GitBlob),
     Commit(GitCommit),
@@ -35,23 +36,27 @@ impl GitObject {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct GitBlob {
     data: Vec<u8>,
 }
 
+#[derive(Clone, Debug)]
 pub struct GitCommit {
     data: Vec<u8>,
     pub kv: IndexMap<String, String>,
 }
 
+#[derive(Clone, Debug)]
 pub struct GitTree {
     data: Vec<u8>,
     pub leafs: Vec<TreeLeaf>,
 }
 
-// not implemented
+#[derive(Clone, Debug)]
 pub struct GitTag {
     data: Vec<u8>,
+    pub kv: IndexMap<String, String>,
 }
 
 impl GitBlob {
@@ -100,7 +105,7 @@ impl GitTree {
             leafs: parse_tree(data),
         }
     }
-    fn serialize(&self) -> Vec<u8> {
+    pub fn serialize(&self) -> Vec<u8> {
         write_tree(self.leafs.clone())
     }
     fn deserialize(data: Vec<u8>) -> Vec<u8> {
@@ -108,15 +113,20 @@ impl GitTree {
     }
 }
 
-// not implemented
 impl GitTag {
     pub fn new(data: Vec<u8>) -> Self {
+        let data = String::from_utf8(data)
+            .unwrap()
+            .trim_end()
+            .to_string()
+            .into_bytes();
         Self {
-            data: GitTag::deserialize(data),
+            data: GitCommit::deserialize(data.clone()),
+            kv: parse_key_value(data, None),
         }
     }
     fn serialize(&self) -> Vec<u8> {
-        self.data.clone()
+        write_key_value(self.kv.clone()).into_bytes()
     }
     fn deserialize(data: Vec<u8>) -> Vec<u8> {
         data

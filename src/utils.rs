@@ -1,13 +1,19 @@
-use crate::git_objects::*;
 use crate::git_repository::{GitRepository, RepoErrors};
+use crate::{get_repo, git_objects::*};
 use indexmap::IndexMap;
 use ini::Ini;
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 use sha1::{Digest, Sha1};
-use std::fs::{self, exists, DirEntry, File};
+use std::fs::{self, exists, File};
 use std::io::Write;
 use std::path::PathBuf;
+
+#[derive(Debug)]
+pub enum FindObjectErrors {
+    NotFound,
+    ManyResults,
+}
 
 pub fn repo_create(path: PathBuf) -> Result<(), RepoErrors> {
     let repo = GitRepository::new(path, true)?;
@@ -219,10 +225,7 @@ fn parse_tree_leaf(raw: Vec<u8>) -> (usize, TreeLeaf) {
     let path =
         String::from_utf8(raw[space + 1..null].to_vec()).expect("failed to parse path as UTF-8");
 
-    let sha = raw[null + 1..null + 21]
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
+    let sha = hex::encode(&raw[null + 1..null + 21]);
     (null + 21, TreeLeaf { mode, path, sha })
 }
 
@@ -291,18 +294,20 @@ pub fn tree_checkout(repo: GitRepository, tree: GitTree, path: PathBuf) {
     })
 }
 
-pub fn read_reference(repo: GitRepository, path: PathBuf) -> String {
-    let content = if let Ok(ref_content) = fs::read(path) {
-        ref_content
+pub fn read_reference(repo: GitRepository, path: &str) -> String {
+    let content = if let Ok(ref_content) = fs::read(repo.repo_path(path.trim())) {
+        ref_content.trim_ascii().to_vec()
     } else {
         return "".to_string();
     };
     match content[0..5] {
         [114, 101, 102, 58, 32] => read_reference(
             repo,
-            PathBuf::from(String::from_utf8(content[5..].to_vec()).expect("Invalid ref")),
+            String::from_utf8(content[5..].to_vec())
+                .expect("Invalid ref")
+                .as_str(),
         ),
-        _ => String::from_utf8(content[5..].to_vec()).unwrap(),
+        _ => String::from_utf8(content.to_vec()).unwrap(),
     }
 }
 
@@ -314,16 +319,18 @@ pub fn list_refs(repo: GitRepository, path: PathBuf) -> Vec<(String, String)> {
         if entry.file_type().unwrap().is_dir() {
             result.append(&mut list_refs(repo.clone(), entry.path()));
         } else {
+            let entry_path = entry
+                .path()
+                .to_str()
+                .unwrap()
+                .split(".git/")
+                .nth(1)
+                .unwrap()
+                .to_string();
+
             result.push((
-                entry
-                    .path()
-                    .to_str()
-                    .unwrap()
-                    .split(".git/")
-                    .nth(1)
-                    .unwrap()
-                    .to_string(),
-                read_reference(repo.clone(), entry.path())
+                entry_path.clone(),
+                read_reference(repo.clone(), entry_path.as_str())
                     .trim()
                     .to_string(),
             ))
@@ -331,6 +338,75 @@ pub fn list_refs(repo: GitRepository, path: PathBuf) -> Vec<(String, String)> {
     });
 
     result
+}
+
+pub fn create_tag_object(repo: GitRepository, name: String, sha: String) {
+    let sha = find_object(sha);
+    let kv = IndexMap::from([
+        ("object".to_string(), sha.clone()),
+        ("type".to_string(), "commit".to_string()),
+        ("tag".to_string(), name.clone()),
+        ("tagger".to_string(), "Tagger".to_string()),
+        ("message".to_string(), "Message".to_string()),
+    ]);
+    let tag_object = GitObject::Tag(GitTag::new(write_key_value(kv).as_bytes().to_vec()));
+    let tag_sha = object_write(None, tag_object.clone());
+
+    object_write(Some(repo.clone()), tag_object);
+    create_ref(repo, format!("tags/{}", name), tag_sha);
+}
+
+pub fn create_ref(repo: GitRepository, name: String, sha: String) {
+    let path = repo.repo_path(("refs/".to_string() + name.as_str()).as_str());
+    println!("{:?}", path);
+    let mut file = File::create(path).expect("Failed to create object file");
+    file.write_all(sha.as_bytes())
+        .expect("Failed to write object");
+}
+
+pub fn find_object(name: String) -> String {
+    let repo = get_repo();
+    let mut results = Vec::new();
+    if name == "HEAD".to_string() {
+        results.push(read_reference(repo.clone(), "HEAD"));
+    };
+    if name.len() > 3 && name.len() < 41 && name.chars().all(|c| c.is_digit(16)) {
+        let path = repo.repo_path(format!("objects/{}/", &name[0..2]).as_str().into());
+        fs::read_dir(path).unwrap().for_each(|entry| {
+            let entry_name = entry.unwrap().file_name();
+            if entry_name.to_str().unwrap().starts_with(&name[2..]) {
+                results.push(name[0..2].to_string() + entry_name.to_str().unwrap());
+            }
+        })
+    }
+
+    let tag_sha = read_reference(repo.clone(), &format!("refs/tags/{}", name));
+    if tag_sha != "".to_string() {
+        let path = repo.repo_path(&format!("objects/{}/{}", &tag_sha[0..2], &tag_sha[2..]));
+        let raw = read_raw(path);
+        let tag = object_read(raw);
+        match tag {
+            GitObject::Tag(tag_obj) => results.push(tag_obj.kv.get("object").unwrap().to_string()),
+            _ => panic!("Not a tag"),
+        };
+    }
+    let branch_sha = read_reference(repo.clone(), &format!("refs/heads/{}", name));
+    if branch_sha != "".to_string() {
+        let path = repo.repo_path(&format!(
+            "objects/{}/{}",
+            &branch_sha[0..2],
+            &branch_sha[2..]
+        ));
+        let raw = read_raw(path);
+        let tag = object_read(raw);
+        match tag {
+            GitObject::Commit(commit_obj) => {
+                results.push(commit_obj.kv.get("tree").unwrap().to_string())
+            }
+            _ => panic!("Not a branch"),
+        };
+    }
+    results.get(0).expect("Not found").to_string()
 }
 
 #[cfg(test)]
@@ -595,10 +671,20 @@ Create first draft",
             leaf2.clone(),
             leaf3.clone(),
         ]);
-        // println!("{:?}", String::from_utf8(result.clone()).unwrap());
-        // println!("{:?}", raw);
-        // println!("{}", String::from_utf8(raw.clone()).unwrap());
+        // String::from_utf8(raw.clone()).unwrap();
+        // println!("{}", String::from_utf8_lossy(&result));
+
         assert_eq!(raw, result);
-        assert_eq!(parse_tree(result), vec![leaf, leaf1, leaf2, leaf3]);
+        assert_eq!(parse_tree(result.clone()), vec![leaf, leaf1, leaf2, leaf3]);
     }
+
+    // #[test]
+    // fn resolves_diferent_naming() {
+    //     let result = find_object("HEAD".to_string());
+    //     assert_eq!("92574eb72578916c79798565d73258ea66aa99e8", result);
+    //     let result = find_object("92574eb".to_string());
+    //     assert_eq!("92574eb72578916c79798565d73258ea66aa99e8", result);
+    //     let result = find_object("main".to_string());
+    //     assert_eq!("c1ac769cc58752966e3fb50d601bccf7d81561b4", result);
+    // }
 }
