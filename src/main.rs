@@ -42,6 +42,9 @@ enum Commands {
         #[arg(default_value = "HEAD")]
         object: String,
     },
+    RevParse {
+        name: String,
+    }
 }
 
 fn main() {
@@ -65,5 +68,6 @@ fn main() {
             write,
             object,
         } => cmd_tag(name, write, object),
+        Commands::RevParse { name } => cmd_rev_parse(name),
     }
 }

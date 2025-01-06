@@ -409,6 +409,13 @@ pub fn find_object(name: String) -> String {
     results.get(0).expect("Not found").to_string()
 }
 
+pub fn print_tree(tree: GitTree) {
+    tree.leafs.iter().for_each(|leaf| {
+        println!("Mode {} hash {} path {}", String::from_utf8(leaf.mode.clone()).unwrap(), leaf.sha, leaf.path);
+    })
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

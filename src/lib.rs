@@ -41,11 +41,15 @@ pub fn cmd_init(path: Option<String>) {
 
 pub fn cmd_cat_file(obj_args: String) {
     let repo = get_repo();
-    let path = repo.repo_path(&format!("objects/{}/{}", &obj_args[0..2], &obj_args[2..]));
+    let hash = find_object(obj_args);
+    let path = repo.repo_path(&format!("objects/{}/{}", &hash[0..2], &hash[2..]));
     let raw = read_raw(path);
     println!("{:?}", raw);
     let obj = object_read(raw);
-    println!("{}", String::from_utf8(obj.serialize()).unwrap());
+    match obj {
+        GitObject::Tree(tree) => print_tree(tree),
+        _ => println!("{}", String::from_utf8(obj.serialize()).unwrap()),
+    }
 }
 
 pub fn cmd_hash_object(path: String, object_type: String, write: bool) {
@@ -103,7 +107,7 @@ pub fn cmd_log(object: String) {
 
 pub fn cmd_ls_tree(object: String, recursive: bool) {
     let repo = get_repo();
-    // let object = find_object(object);
+    let object = find_object(object);
 
     println!("{}", object);
     let path = repo.repo_path(&format!("objects/{}/{}", &object[0..2], &object[2..]));
@@ -174,4 +178,8 @@ pub fn cmd_tag(name: String, write_object: bool, sha: String) {
     } else {
         create_ref(repo, name, sha);
     };
+}
+
+pub fn cmd_rev_parse(name: String) {
+    println!("{}", find_object(name));
 }
