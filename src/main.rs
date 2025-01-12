@@ -44,7 +44,7 @@ enum Commands {
     },
     RevParse {
         name: String,
-    }
+    },
 }
 
 fn main() {

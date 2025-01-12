@@ -2,12 +2,14 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+pub mod git_index;
 pub mod git_objects;
 pub mod git_repository;
 pub mod utils;
 
 use git_objects::*;
 use git_repository::GitRepository;
+use indexmap::IndexMap;
 use utils::*;
 
 use crate::git_repository::RepoErrors;
@@ -93,7 +95,8 @@ pub fn cmd_log(object: String) {
         let raw = read_raw(path);
         let obj = object_read(raw);
 
-        let parsed_data = parse_key_value(obj.deserialize(), None);
+        let mut index_map = IndexMap::new();
+        let parsed_data = parse_key_value(obj.deserialize(), &mut index_map);
         println!("{}", String::from_utf8(obj.serialize()).unwrap());
         println!("^^^^^^^^^^^");
 
@@ -160,13 +163,13 @@ pub fn cmd_checkout(commit: String, path: String) {
         _ => panic!("corrupted commit"),
     };
 
-    tree_checkout(repo, tree, PathBuf::from(path));
+    tree_checkout(&repo, tree, PathBuf::from(path));
 }
 
 pub fn cmd_show_ref() {
     let repo = get_repo();
     let path = repo.repo_path("refs");
-    let refs = list_refs(repo, path);
+    let refs = list_refs(&repo, path);
     refs.iter()
         .for_each(|entry| println!("{} {}", entry.1, entry.0))
 }
@@ -174,9 +177,9 @@ pub fn cmd_show_ref() {
 pub fn cmd_tag(name: String, write_object: bool, sha: String) {
     let repo = get_repo();
     if write_object {
-        create_tag_object(repo, name, sha);
+        create_tag_object(&repo, name, sha);
     } else {
-        create_ref(repo, name, sha);
+        create_ref(&repo, name, sha);
     };
 }
 

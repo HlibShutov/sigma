@@ -80,9 +80,11 @@ impl GitCommit {
             .trim_end()
             .to_string()
             .into_bytes();
+        let mut index_map = IndexMap::new();
+        let kv = parse_key_value(data.clone(), &mut index_map);
         Self {
             data: GitCommit::deserialize(data.clone()),
-            kv: parse_key_value(data, None),
+            kv: kv.clone(),
         }
     }
     fn serialize(&self) -> Vec<u8> {
@@ -94,7 +96,8 @@ impl GitCommit {
             .trim_end()
             .to_string()
             .into_bytes();
-        write_key_value(parse_key_value(raw, None)).into_bytes()
+        let mut index_map = IndexMap::new();
+        write_key_value(parse_key_value(raw, &mut index_map).clone()).into_bytes()
     }
 }
 
@@ -120,9 +123,10 @@ impl GitTag {
             .trim_end()
             .to_string()
             .into_bytes();
+        let mut index_map = IndexMap::new();
         Self {
             data: GitCommit::deserialize(data.clone()),
-            kv: parse_key_value(data, None),
+            kv: parse_key_value(data, &mut index_map).clone(),
         }
     }
     fn serialize(&self) -> Vec<u8> {
