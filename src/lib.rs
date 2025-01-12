@@ -1,5 +1,8 @@
 use std::env;
 use std::fs;
+use std::fs::File;
+use std::io::BufReader;
+use std::io::Read;
 use std::path::PathBuf;
 
 pub mod git_index;
@@ -185,4 +188,16 @@ pub fn cmd_tag(name: String, write_object: bool, sha: String) {
 
 pub fn cmd_rev_parse(name: String) {
     println!("{}", find_object(name));
+}
+
+pub fn cmd_ls_files() {
+    let repo = get_repo();
+    let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
+    let mut index = Vec::new();
+    index_buf.read_to_end(&mut index).unwrap();
+    let parsed_index = index_parse(index.to_vec());
+
+    parsed_index
+        .iter()
+        .for_each(|entry| println!("{:?}", entry));
 }

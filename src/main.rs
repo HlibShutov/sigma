@@ -45,6 +45,7 @@ enum Commands {
     RevParse {
         name: String,
     },
+    LsFiles,
 }
 
 fn main() {
@@ -69,5 +70,6 @@ fn main() {
             object,
         } => cmd_tag(name, write, object),
         Commands::RevParse { name } => cmd_rev_parse(name),
+        Commands::LsFiles => cmd_ls_files(),
     }
 }
