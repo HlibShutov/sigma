@@ -1,12 +1,15 @@
 use crate::git_repository::{GitRepository, RepoErrors};
 use crate::{get_repo, git_index::*, git_objects::*};
+use glob::Pattern;
 use indexmap::IndexMap;
 use ini::Ini;
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use miniz_oxide::inflate::decompress_to_vec_zlib;
 use sha1::{Digest, Sha1};
+use std::collections::HashMap;
+use std::env;
 use std::fs::{self, exists, File};
-use std::io::Write;
+use std::io::{BufReader, Read, Write};
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -462,7 +465,6 @@ pub fn index_parse(mut raw: Vec<u8>) -> Vec<IndexEntry> {
     let mut entries = Vec::new();
     let mut idx = 0;
     let mut count = u32::from_be_bytes(raw[8..12].try_into().unwrap());
-    println!("{}", count);
     raw = raw[12..].to_vec();
 
     while count > 0 {
@@ -482,10 +484,116 @@ pub fn index_parse(mut raw: Vec<u8>) -> Vec<IndexEntry> {
     entries
 }
 
+pub fn read_gitignores(
+    repo: &GitRepository,
+) -> (Vec<(String, bool)>, HashMap<String, Vec<(String, bool)>>) {
+    let mut absolute = Vec::new();
+    let mut scope = HashMap::new();
+
+    let repo_file = repo.repo_path("info/exclude");
+    if repo_file.is_file() {
+        absolute.extend(parse_git_ignore(
+            fs::read_to_string(repo_file).unwrap().lines(),
+        ))
+    }
+
+    let config_home = if let Ok(xdg_config_home) = env::var("XDG_CONFIG_HOME") {
+        xdg_config_home
+    } else {
+        format!("{}/{}", env::var("HOME").unwrap(), ".config/")
+    };
+
+    let global_file = PathBuf::from(format!("{}{}", config_home, "git/ignore"));
+    if global_file.is_file() {
+        absolute.extend(parse_git_ignore(
+            fs::read_to_string(global_file).unwrap().lines(),
+        ))
+    }
+
+    let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
+    let mut index = Vec::new();
+    index_buf.read_to_end(&mut index).unwrap();
+    let parsed_index = index_parse(index.to_vec());
+    parsed_index.iter().for_each(|entry| {
+        if entry.path == ".gitignore".to_string() || entry.path.ends_with("/.gitignore") {
+            let dir_name = PathBuf::from(&entry.path)
+                .parent()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let path = repo.repo_path(&format!("objects/{}/{}", &entry.sha[0..2], &entry.sha[2..]));
+            let raw = read_raw(path);
+            let obj = object_read(raw);
+            let lines = String::from_utf8(obj.serialize()).unwrap();
+            let git_ignore_rules = parse_git_ignore(lines.lines());
+            scope.insert(dir_name, git_ignore_rules);
+        }
+    });
+    (absolute, scope)
+}
+
+fn parse_git_ignore(lines: std::str::Lines) -> Vec<(String, bool)> {
+    let mut rules = Vec::new();
+    lines.for_each(|line| {
+        let mut chars = line.trim().chars();
+        match chars.next().unwrap() {
+            '!' => rules.push((chars.as_str().to_string(), false)),
+            '#' => (),
+            '\\' => rules.push((chars.as_str().to_string(), true)),
+            _ => rules.push((line.to_string(), true)),
+        };
+    });
+
+    rules
+}
+
+pub fn check_ignore_scoped(
+    rules: HashMap<String, Vec<(String, bool)>>,
+    path: PathBuf,
+) -> Option<bool> {
+    let mut result = None;
+    let mut parent_option = path.parent();
+    while let Some(parent) = parent_option {
+        let mut parent_str = parent.to_str().unwrap();
+        let mut parent_str_chars = parent_str.chars();
+        if parent_str_chars.next() == Some('/') {
+            parent_str = parent_str_chars.as_str();
+        }
+        if rules.contains_key(parent_str) {
+            let scoped_rules = rules.get(parent_str).unwrap();
+            scoped_rules.iter().for_each(|(rule, value)| {
+                if let Ok(matcher) = Pattern::new(rule) {
+                    if matcher.matches(path.to_str().unwrap()) {
+                        result = Some(*value);
+                    }
+                }
+            });
+            if result.is_some() {
+                return result;
+            }
+        }
+        parent_option = parent.parent();
+    }
+
+    result
+}
+
+pub fn check_ignore_absolute(rules: Vec<(String, bool)>, path: PathBuf) -> Option<bool> {
+    let mut result = None;
+    rules.iter().for_each(|(rule, value)| {
+        if let Ok(matcher) = Pattern::new(rule) {
+            if matcher.matches(path.to_str().unwrap()) {
+                result = Some(*value);
+            }
+        }
+    });
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
-    use std::io::{BufReader, Read};
-
     use super::*;
 
     #[test]
@@ -1018,5 +1126,18 @@ Create first draft",
         let result = index_parse(index.to_vec());
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_collects_git_ignores() {
+        let repo = get_repo();
+        let (_absolute, mut scope) = read_gitignores(&repo);
+        scope
+            .get_mut("")
+            .unwrap()
+            .push(("/test/test".to_string(), true));
+        let result = check_ignore_scoped(scope, PathBuf::from("/test/test")).unwrap();
+        // let result = check_ignore_absolute(absolute, PathBuf::from("/test/test")).unwrap();
+        assert_eq!(result, true);
     }
 }

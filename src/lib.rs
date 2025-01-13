@@ -201,3 +201,15 @@ pub fn cmd_ls_files() {
         .iter()
         .for_each(|entry| println!("{:?}", entry));
 }
+
+pub fn cmd_check_ignore(names: Vec<String>) {
+    let repo = get_repo();
+    let (absolute, scope) = read_gitignores(&repo);
+    names.iter().for_each(|name| {
+        let result_scope = check_ignore_scoped(scope.clone(), PathBuf::from(name));
+        let result_absolute = check_ignore_absolute(absolute.clone(), PathBuf::from("/test/test"));
+        if result_scope.is_some() || result_absolute.is_some() {
+            println!("{}", name);
+        }
+    })
+}

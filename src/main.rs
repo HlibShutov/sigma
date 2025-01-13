@@ -46,6 +46,9 @@ enum Commands {
         name: String,
     },
     LsFiles,
+    CheckIgnore {
+        names: Vec<String>,
+    },
 }
 
 fn main() {
@@ -71,5 +74,6 @@ fn main() {
         } => cmd_tag(name, write, object),
         Commands::RevParse { name } => cmd_rev_parse(name),
         Commands::LsFiles => cmd_ls_files(),
+        Commands::CheckIgnore { names } => cmd_check_ignore(names),
     }
 }
