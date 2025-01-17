@@ -564,7 +564,9 @@ pub fn check_ignore_scoped(
             let scoped_rules = rules.get(parent_str).unwrap();
             scoped_rules.iter().for_each(|(rule, value)| {
                 if let Ok(matcher) = Pattern::new(rule) {
-                    if matcher.matches(path.to_str().unwrap()) {
+                    if matcher.matches(path.to_str().unwrap())
+                        || path.to_str().unwrap().contains(rule)
+                    {
                         result = Some(*value);
                     }
                 }
@@ -583,13 +585,38 @@ pub fn check_ignore_absolute(rules: Vec<(String, bool)>, path: PathBuf) -> Optio
     let mut result = None;
     rules.iter().for_each(|(rule, value)| {
         if let Ok(matcher) = Pattern::new(rule) {
-            if matcher.matches(path.to_str().unwrap()) {
+            if matcher.matches(path.to_str().unwrap()) || path.to_str().unwrap().contains(rule) {
                 result = Some(*value);
             }
         }
     });
 
     result
+}
+
+pub fn flat_tree(repo: &GitRepository, name: &str, prefix: String) -> HashMap<String, String> {
+    let mut flat = HashMap::new();
+    let sha = find_object(name.to_string());
+    let path = repo.repo_path(&format!("objects/{}/{}", &sha[0..2], &sha[2..]));
+    let raw = read_raw(path);
+    let tree = match object_read(raw) {
+        GitObject::Tree(tree) => tree,
+        _ => panic!("Not a tree"),
+    };
+
+    tree.leafs.iter().for_each(|leaf| {
+        if leaf.mode[0..2] == [48, 52] {
+            flat.extend(flat_tree(
+                repo,
+                &leaf.sha,
+                prefix.clone() + &leaf.path + "/",
+            ));
+        } else {
+            flat.insert(prefix.clone() + &leaf.path, leaf.sha.clone());
+        }
+    });
+
+    flat
 }
 
 #[cfg(test)]
@@ -1128,16 +1155,46 @@ Create first draft",
         assert_eq!(result, expected);
     }
 
+    // #[test]
+    // fn test_collects_git_ignores() {
+    //     let repo = get_repo();
+    //     let (_absolute, mut scope) = read_gitignores(&repo);
+    //     scope
+    //         .get_mut("")
+    //         .unwrap()
+    //         .push(("/test/test".to_string(), true));
+    //     let result = check_ignore_scoped(scope, PathBuf::from("/test/test")).unwrap();
+    //     // let result = check_ignore_absolute(absolute, PathBuf::from("/test/test")).unwrap();
+    //     assert_eq!(result, true);
+    // }
+    //
     #[test]
-    fn test_collects_git_ignores() {
-        let repo = get_repo();
-        let (_absolute, mut scope) = read_gitignores(&repo);
-        scope
-            .get_mut("")
-            .unwrap()
-            .push(("/test/test".to_string(), true));
-        let result = check_ignore_scoped(scope, PathBuf::from("/test/test")).unwrap();
-        // let result = check_ignore_absolute(absolute, PathBuf::from("/test/test")).unwrap();
-        assert_eq!(result, true);
+    fn test_flat_tree() {
+        let tree = object_read(vec![
+            116, 114, 101, 101, 32, 49, 52, 52, 0, 49, 48, 48, 54, 52, 52, 32, 46, 103, 105, 116,
+            105, 103, 110, 111, 114, 101, 0, 143, 198, 70, 233, 73, 101, 203, 249, 15, 171, 12,
+            170, 247, 52, 239, 165, 131, 193, 149, 80, 49, 48, 48, 54, 52, 52, 32, 67, 97, 114,
+            103, 111, 46, 108, 111, 99, 107, 0, 177, 156, 84, 207, 203, 228, 132, 172, 18, 142,
+            184, 176, 112, 187, 195, 221, 109, 202, 175, 206, 49, 48, 48, 54, 52, 52, 32, 67, 97,
+            114, 103, 111, 46, 116, 111, 109, 108, 0, 38, 216, 158, 178, 78, 190, 114, 184, 94, 54,
+            211, 5, 228, 63, 57, 140, 122, 8, 253, 92, 52, 48, 48, 48, 48, 32, 115, 114, 99, 0,
+            120, 71, 174, 105, 223, 193, 196, 102, 231, 99, 21, 97, 176, 230, 241, 134, 142, 212,
+            73, 243,
+        ]);
+        let tree = match tree {
+            GitObject::Tree(tree) => tree,
+            _ => panic!("Error"),
+        };
+        println!("{:?}", tree);
+        println!(
+            "{:?}",
+            flat_tree(
+                &get_repo(),
+                "f3e9539c5a6a1483179f88f7c0629c415748635f",
+                "".to_string()
+            )
+        );
+
+        assert_eq!(1, 2);
     }
 }

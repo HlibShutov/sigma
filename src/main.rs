@@ -49,6 +49,7 @@ enum Commands {
     CheckIgnore {
         names: Vec<String>,
     },
+    Status,
 }
 
 fn main() {
@@ -75,5 +76,6 @@ fn main() {
         Commands::RevParse { name } => cmd_rev_parse(name),
         Commands::LsFiles => cmd_ls_files(),
         Commands::CheckIgnore { names } => cmd_check_ignore(names),
+        Commands::Status => cmd_status(),
     }
 }

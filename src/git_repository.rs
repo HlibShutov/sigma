@@ -11,7 +11,7 @@ pub enum RepoErrors {
 
 #[derive(Clone)]
 pub struct GitRepository {
-    worktree: PathBuf,
+    pub worktree: PathBuf,
     gitdir: PathBuf,
     config: Option<Ini>,
 }

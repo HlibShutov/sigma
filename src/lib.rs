@@ -18,6 +18,9 @@ use utils::*;
 use crate::git_repository::RepoErrors;
 use crate::utils::repo_create;
 
+use std::os::unix::fs::MetadataExt;
+use walkdir::WalkDir;
+
 fn get_repo() -> GitRepository {
     let repo_path = env::current_dir().expect("failed to get current dir");
 
@@ -212,4 +215,86 @@ pub fn cmd_check_ignore(names: Vec<String>) {
             println!("{}", name);
         }
     })
+}
+
+pub fn cmd_status() {
+    let repo = get_repo();
+    let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
+    let mut index = Vec::new();
+    index_buf.read_to_end(&mut index).unwrap();
+    let parsed_index = index_parse(index.to_vec());
+
+    let head = find_object("HEAD".to_string());
+    let head_path = repo.repo_path(&format!("objects/{}/{}", &head[0..2], &head[2..]));
+    let raw = read_raw(head_path);
+    let head_tree = match object_read(raw) {
+        GitObject::Commit(commit) => commit.kv.get("tree").unwrap().clone(),
+        _ => panic!("Broken HEAD"),
+    };
+
+    let flat_tree = flat_tree(&repo, &head_tree, "".to_string());
+
+    parsed_index
+        .iter()
+        .for_each(|entry| match flat_tree.get(&entry.path) {
+            Some(entry_name) => {
+                if *entry_name != entry.sha {
+                    println!("Modified {}", entry.path);
+                }
+            }
+            None => println!("Added {}", entry.path),
+        });
+
+    println!("HEAD and index");
+    let (absolute, scope) = read_gitignores(&repo);
+    let mut all_files = Vec::new();
+    for entry in WalkDir::new(".") {
+        let entry = entry.unwrap();
+        let mut path = entry.path().to_str().unwrap().chars();
+        path.next();
+        let path = path.as_str();
+        let ignore_scoped = check_ignore_scoped(scope.clone(), path.into());
+        let ignore_absolute = check_ignore_absolute(absolute.clone(), path.into());
+        let ignore = ignore_scoped.unwrap_or(false) || ignore_absolute.unwrap_or(false);
+        if !ignore && !path.starts_with("/.git/") && path != "/.git" && !entry.path().is_dir() {
+            all_files.push(path.to_string());
+
+            println!("{}", entry.path().display());
+        }
+    }
+    println!("kts");
+
+    println!("HEAD and index");
+
+    parsed_index.iter().for_each(|entry| {
+        let full_path = repo.worktree.join(&entry.path);
+        if !full_path.is_file() {
+            println!("deleted {}", entry.path);
+        } else {
+            let metadata = fs::metadata(&full_path).unwrap();
+            let created = metadata.ctime();
+            let modified = metadata.mtime();
+
+            if created != entry.ctime as i64 && modified != entry.mtime as i64 {
+                let data = fs::read(&full_path).expect("Failed to read object");
+
+                let obj = GitObject::Blob(GitBlob::new(data));
+
+                let sha = object_write(None, obj);
+                if sha != entry.sha {
+                    println!("modified {}", entry.path);
+                }
+            }
+        }
+        let index = all_files
+            .iter()
+            .position(|x| *x == "/".to_string() + &entry.path)
+            .unwrap();
+        all_files.remove(index);
+    });
+
+    println!("not in index");
+    all_files.iter().for_each(|file| {
+        println!("{}", file);
+    });
 }
