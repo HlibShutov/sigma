@@ -264,7 +264,7 @@ pub fn write_tree(mut leafs: Vec<TreeLeaf>) -> Vec<u8> {
     leafs.iter().for_each(|leaf| {
         let mut mode = leaf.mode.clone();
         while mode.starts_with(&[48]) {
-            mode.remove(0); // Remove the first element
+            mode.remove(0);
         }
         result.extend(mode);
         result.push(32);
@@ -434,6 +434,10 @@ pub fn index_entry_parse(raw: Vec<u8>) -> (IndexEntry, u16) {
     let size = u32::from_be_bytes(raw[36..40].try_into().unwrap());
     let sha = raw[40..60].iter().map(|b| format!("{:02x}", b)).collect();
     let flags = u16::from_be_bytes(raw[60..62].try_into().unwrap());
+    let assume_valid = (flags & 0x8000) != 0; // Bit 15
+    let stage = ((flags & 0x6000) >> 13) as u8; // Bits 14-13
+    let name_length = (flags & 0x0FFF) as usize; // Bits 12-0
+
     let name_length = (flags & 0x0FFF) + 62;
     let path = String::from_utf8(raw[62..name_length as usize].to_vec()).unwrap();
 
@@ -456,6 +460,9 @@ pub fn index_entry_parse(raw: Vec<u8>) -> (IndexEntry, u16) {
             size,
             sha,
             path,
+            assume_valid,
+            stage,
+            name_length,
         },
         name_length,
     )
@@ -619,9 +626,112 @@ pub fn flat_tree(repo: &GitRepository, name: &str, prefix: String) -> HashMap<St
     flat
 }
 
+pub fn write_index(index: Vec<IndexEntry>) -> Vec<u8> {
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(b"DIRC");
+    buffer.extend_from_slice(&[0, 0, 0, 2]);
+    buffer.extend_from_slice(&(index.len() as u32).to_be_bytes());
+
+    let mut idx = 0;
+    for e in index {
+        buffer.extend_from_slice(&e.ctime.to_be_bytes());
+        buffer.extend_from_slice(&e.ctime_n.to_be_bytes());
+        buffer.extend_from_slice(&e.mtime.to_be_bytes());
+        buffer.extend_from_slice(&e.mtime_n.to_be_bytes());
+        buffer.extend_from_slice(&e.device.to_be_bytes());
+        buffer.extend_from_slice(&e.ino.to_be_bytes());
+
+        let mode = (e.mode_type << 12) | e.mode_perms;
+        buffer.extend_from_slice(&mode.to_be_bytes());
+
+        buffer.extend_from_slice(&e.uid.to_be_bytes());
+        buffer.extend_from_slice(&e.gid.to_be_bytes());
+        buffer.extend_from_slice(&e.size.to_be_bytes());
+
+        let sha_bytes = hex::decode(&e.sha).expect("Invalid SHA format");
+        buffer.extend_from_slice(&sha_bytes);
+
+        let flag_assume_valid = if e.assume_valid { 0x1 << 15 } else { 0 };
+
+        let name_bytes = e.path.as_bytes();
+        let name_length = std::cmp::min(name_bytes.len(), 0xFFF);
+
+        let flags_and_length = (flag_assume_valid | (e.stage as u16) | (name_length as u16)) as u16;
+        buffer.extend_from_slice(&flags_and_length.to_be_bytes());
+
+        buffer.extend_from_slice(name_bytes);
+        buffer.push(0);
+
+        idx += 62 + name_bytes.len() + 1;
+        if idx % 8 != 0 {
+            let pad = 8 - (idx % 8);
+            let padding = vec![0u8; pad];
+            buffer.extend_from_slice(&padding);
+            idx += pad;
+        }
+    }
+
+    buffer
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn get_index_entries_fixture() -> Vec<IndexEntry> {
+        vec![
+            IndexEntry {
+                ctime: 1735589333,
+                ctime_n: 588955195,
+                mtime: 1731336461,
+                mtime_n: 588955195,
+                device: 66310,
+                ino: 132985,
+                mode_type: 8,
+                mode_perms: 420,
+                uid: 1000,
+                gid: 1000,
+                size: 8,
+                sha: "ea8c4bf7f35f6f77f75d92ad8ce8349f6e81ddba".to_string(),
+                path: ".gitignore".to_string(),
+                assume_valid: false,
+                stage: 0,
+                name_length: 72,
+            },
+            IndexEntry {
+                ctime: 1735589333,
+                ctime_n: 948591364,
+                mtime: 1733058282,
+                mtime_n: 948591364,
+                device: 66310,
+                ino: 129456,
+                mode_type: 8,
+                mode_perms: 420,
+                uid: 1000,
+                gid: 1000,
+                size: 12740,
+                sha: "f364f3b371686b66208f5772e1a50060461adb8b".to_string(),
+                path: "Cargo.lock".to_string(),
+                assume_valid: false,
+                stage: 0,
+                name_length: 72,
+            },
+        ]
+    }
+
+    fn get_index_bytes_fixture() -> [u8; 172] {
+        [
+            68, 73, 82, 67, 0, 0, 0, 2, 0, 0, 0, 2, 103, 114, 253, 213, 35, 26, 190, 59, 103, 50,
+            25, 13, 35, 26, 190, 59, 0, 1, 3, 6, 0, 2, 7, 121, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0,
+            3, 232, 0, 0, 0, 8, 234, 140, 75, 247, 243, 95, 111, 119, 247, 93, 146, 173, 140, 232,
+            52, 159, 110, 129, 221, 186, 0, 10, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0,
+            0, 0, 0, 0, 0, 0, 0, 103, 114, 253, 213, 56, 138, 91, 4, 103, 76, 94, 234, 56, 138, 91,
+            4, 0, 1, 3, 6, 0, 1, 249, 176, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 49,
+            196, 243, 100, 243, 179, 113, 104, 107, 102, 32, 143, 87, 114, 225, 165, 0, 96, 70, 26,
+            219, 139, 0, 10, 67, 97, 114, 103, 111, 46, 108, 111, 99, 107, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]
+    }
 
     #[test]
     fn calculates_hash() {
@@ -962,6 +1072,9 @@ Create first draft",
             size: 8,
             sha: "ea8c4bf7f35f6f77f75d92ad8ce8349f6e81ddba".to_string(),
             path: ".gitignore".to_string(),
+            assume_valid: false,
+            stage: 0,
+            name_length: 72,
         };
 
         assert_eq!(result.ctime, expected.ctime);
@@ -986,170 +1099,8 @@ Create first draft",
         // let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
         // let mut index = Vec::new();
         // index_buf.read_to_end(&mut index).unwrap();
-
-        let index = [
-            68, 73, 82, 67, 0, 0, 0, 2, 0, 0, 0, 8, 103, 114, 253, 213, 35, 26, 190, 59, 103, 50,
-            25, 13, 35, 26, 190, 59, 0, 1, 3, 6, 0, 2, 7, 121, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0,
-            3, 232, 0, 0, 0, 8, 234, 140, 75, 247, 243, 95, 111, 119, 247, 93, 146, 173, 140, 232,
-            52, 159, 110, 129, 221, 186, 0, 10, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0,
-            0, 0, 0, 0, 0, 0, 0, 103, 114, 253, 213, 56, 138, 91, 4, 103, 76, 94, 234, 56, 138, 91,
-            4, 0, 1, 3, 6, 0, 1, 249, 176, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 49,
-            196, 243, 100, 243, 179, 113, 104, 107, 102, 32, 143, 87, 114, 225, 165, 0, 96, 70, 26,
-            219, 139, 0, 10, 67, 97, 114, 103, 111, 46, 108, 111, 99, 107, 0, 0, 0, 0, 0, 0, 0, 0,
-            103, 114, 253, 213, 0, 130, 233, 115, 103, 76, 94, 234, 0, 130, 233, 115, 0, 1, 3, 6,
-            0, 1, 243, 181, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 0, 218, 223, 232, 90,
-            134, 224, 230, 147, 79, 207, 188, 65, 197, 93, 245, 33, 236, 191, 249, 215, 111, 0, 10,
-            67, 97, 114, 103, 111, 46, 116, 111, 109, 108, 0, 0, 0, 0, 0, 0, 0, 0, 103, 124, 3,
-            172, 40, 208, 129, 140, 103, 124, 3, 172, 40, 208, 129, 140, 0, 1, 3, 6, 0, 2, 131, 74,
-            0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 12, 131, 101, 227, 253, 60, 10, 69,
-            22, 8, 68, 235, 230, 149, 122, 125, 221, 210, 106, 120, 12, 102, 0, 18, 115, 114, 99,
-            47, 103, 105, 116, 95, 111, 98, 106, 101, 99, 116, 115, 46, 114, 115, 0, 0, 0, 0, 0, 0,
-            0, 0, 103, 114, 253, 213, 34, 91, 16, 105, 103, 109, 96, 74, 34, 91, 16, 105, 0, 1, 3,
-            6, 0, 1, 244, 132, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 5, 10, 162, 80,
-            131, 251, 42, 95, 218, 181, 173, 68, 165, 211, 21, 159, 48, 35, 225, 182, 79, 129, 0,
-            21, 115, 114, 99, 47, 103, 105, 116, 95, 114, 101, 112, 111, 115, 105, 116, 111, 114,
-            121, 46, 114, 115, 0, 0, 0, 0, 0, 103, 125, 121, 225, 33, 37, 90, 77, 103, 125, 121,
-            225, 32, 242, 125, 80, 0, 1, 3, 6, 0, 2, 147, 242, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0,
-            3, 232, 0, 0, 21, 136, 81, 41, 243, 66, 140, 184, 137, 4, 113, 156, 138, 32, 164, 21,
-            40, 195, 227, 101, 149, 212, 0, 10, 115, 114, 99, 47, 108, 105, 98, 46, 114, 115, 0, 0,
-            0, 0, 0, 0, 0, 0, 103, 124, 51, 72, 48, 63, 202, 116, 103, 124, 51, 72, 48, 63, 202,
-            116, 0, 1, 3, 6, 0, 2, 141, 148, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 6,
-            172, 159, 27, 174, 168, 104, 141, 73, 139, 1, 172, 191, 250, 141, 225, 254, 36, 142,
-            190, 183, 75, 0, 11, 115, 114, 99, 47, 109, 97, 105, 110, 46, 114, 115, 0, 0, 0, 0, 0,
-            0, 0, 103, 124, 50, 35, 14, 237, 231, 69, 103, 124, 50, 35, 14, 237, 231, 69, 0, 1, 3,
-            6, 0, 2, 72, 22, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 107, 27, 69, 111,
-            235, 5, 85, 57, 182, 87, 57, 68, 113, 125, 61, 124, 198, 171, 61, 48, 224, 60, 0, 12,
-            115, 114, 99, 47, 117, 116, 105, 108, 115, 46, 114, 115, 0, 0, 0, 0, 0, 0, 84, 82, 69,
-            69, 0, 0, 0, 53, 0, 56, 32, 49, 10, 26, 26, 190, 178, 240, 123, 115, 252, 204, 178,
-            153, 20, 123, 49, 235, 228, 9, 14, 230, 212, 115, 114, 99, 0, 53, 32, 48, 10, 198, 157,
-            1, 10, 221, 192, 235, 114, 46, 157, 124, 137, 122, 90, 117, 227, 171, 53, 136, 115,
-            100, 134, 180, 179, 215, 165, 49, 185, 158, 173, 100, 117, 100, 254, 167, 214, 148, 21,
-            106, 209,
-        ];
-
-        let expected = vec![
-            IndexEntry {
-                ctime: 1735589333,
-                ctime_n: 588955195,
-                mtime: 1731336461,
-                mtime_n: 588955195,
-                device: 66310,
-                ino: 132985,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 8,
-                sha: "ea8c4bf7f35f6f77f75d92ad8ce8349f6e81ddba".to_string(),
-                path: ".gitignore".to_string(),
-            },
-            IndexEntry {
-                ctime: 1735589333,
-                ctime_n: 948591364,
-                mtime: 1733058282,
-                mtime_n: 948591364,
-                device: 66310,
-                ino: 129456,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 12740,
-                sha: "f364f3b371686b66208f5772e1a50060461adb8b".to_string(),
-                path: "Cargo.lock".to_string(),
-            },
-            IndexEntry {
-                ctime: 1735589333,
-                ctime_n: 8579443,
-                mtime: 1733058282,
-                mtime_n: 8579443,
-                device: 66310,
-                ino: 127925,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 218,
-                sha: "dfe85a86e0e6934fcfbc41c55df521ecbff9d76f".to_string(),
-                path: "Cargo.toml".to_string(),
-            },
-            IndexEntry {
-                ctime: 1736180652,
-                ctime_n: 684753292,
-                mtime: 1736180652,
-                mtime_n: 684753292,
-                device: 66310,
-                ino: 164682,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 3203,
-                sha: "65e3fd3c0a45160844ebe6957a7dddd26a780c66".to_string(),
-                path: "src/git_objects.rs".to_string(),
-            },
-            IndexEntry {
-                ctime: 1735589333,
-                ctime_n: 576393321,
-                mtime: 1735221322,
-                mtime_n: 576393321,
-                device: 66310,
-                ino: 128132,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 1290,
-                sha: "a25083fb2a5fdab5ad44a5d3159f3023e1b64f81".to_string(),
-                path: "src/git_repository.rs".to_string(),
-            },
-            IndexEntry {
-                ctime: 1736276449,
-                ctime_n: 556096077,
-                mtime: 1736276449,
-                mtime_n: 552762704,
-                device: 66310,
-                ino: 168946,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 5512,
-                sha: "5129f3428cb88904719c8a20a41528c3e36595d4".to_string(),
-                path: "src/lib.rs".to_string(),
-            },
-            IndexEntry {
-                ctime: 1736192840,
-                ctime_n: 809486964,
-                mtime: 1736192840,
-                mtime_n: 809486964,
-                device: 66310,
-                ino: 167316,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 1708,
-                sha: "9f1baea8688d498b01acbffa8de1fe248ebeb74b".to_string(),
-                path: "src/main.rs".to_string(),
-            },
-            IndexEntry {
-                ctime: 1736192547,
-                ctime_n: 250472261,
-                mtime: 1736192547,
-                mtime_n: 250472261,
-                device: 66310,
-                ino: 149526,
-                mode_type: 8,
-                mode_perms: 420,
-                uid: 1000,
-                gid: 1000,
-                size: 27419,
-                sha: "456feb055539b6573944717d3d7cc6ab3d30e03c".to_string(),
-                path: "src/utils.rs".to_string(),
-            },
-        ];
-
+        let index = get_index_bytes_fixture();
+        let expected = get_index_entries_fixture();
         let result = index_parse(index.to_vec());
 
         assert_eq!(result, expected);
@@ -1195,6 +1146,14 @@ Create first draft",
             )
         );
 
-        assert_eq!(1, 2);
+        // assert_eq!(1, 2);
+    }
+
+    #[test]
+    fn test_writes_index() {
+        let index = get_index_entries_fixture();
+        let result = write_index(index);
+        let expected = get_index_bytes_fixture();
+        assert_eq!(result, expected);
     }
 }

@@ -3,6 +3,7 @@ use std::fs;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::io::Write;
 use std::path::PathBuf;
 
 pub mod git_index;
@@ -16,7 +17,6 @@ use indexmap::IndexMap;
 use utils::*;
 
 use crate::git_repository::RepoErrors;
-use crate::utils::repo_create;
 
 use std::os::unix::fs::MetadataExt;
 use walkdir::WalkDir;
@@ -297,4 +297,24 @@ pub fn cmd_status() {
     all_files.iter().for_each(|file| {
         println!("{}", file);
     });
+}
+
+pub fn cmd_rm(names: Vec<String>, delete: bool) {
+    let repo = get_repo();
+    let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
+    let mut index = Vec::new();
+    index_buf.read_to_end(&mut index).unwrap();
+    let mut parsed_index = index_parse(index.to_vec());
+    parsed_index.retain(|entry| !names.contains(&entry.path));
+
+    let new_index = write_index(parsed_index.clone());
+    let _ = File::create(repo.repo_path("index"))
+        .unwrap()
+        .write_all(&new_index);
+
+    if delete {
+        names.iter().for_each(|name| {
+            let _ = fs::remove_file(repo.worktree.join(name));
+        });
+    }
 }

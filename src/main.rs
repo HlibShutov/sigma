@@ -50,6 +50,11 @@ enum Commands {
         names: Vec<String>,
     },
     Status,
+    Rm {
+        names: Vec<String>,
+        #[arg(short = 'd')]
+        delete: bool,
+    },
 }
 
 fn main() {
@@ -77,5 +82,6 @@ fn main() {
         Commands::LsFiles => cmd_ls_files(),
         Commands::CheckIgnore { names } => cmd_check_ignore(names),
         Commands::Status => cmd_status(),
+        Commands::Rm { names, delete } => cmd_rm(names, delete),
     }
 }

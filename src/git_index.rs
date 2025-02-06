@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct IndexEntry {
     pub ctime: u32,
     pub ctime_n: u32,
@@ -13,4 +13,7 @@ pub struct IndexEntry {
     pub size: u32,
     pub sha: String,
     pub path: String,
+    pub assume_valid: bool,
+    pub stage: u8,
+    pub name_length: u16,
 }
