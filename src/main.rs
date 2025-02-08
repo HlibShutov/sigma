@@ -55,6 +55,9 @@ enum Commands {
         #[arg(short = 'd')]
         delete: bool,
     },
+    Add {
+        names: Vec<String>,
+    },
 }
 
 fn main() {
@@ -83,5 +86,6 @@ fn main() {
         Commands::CheckIgnore { names } => cmd_check_ignore(names),
         Commands::Status => cmd_status(),
         Commands::Rm { names, delete } => cmd_rm(names, delete),
+        Commands::Add { names } => cmd_add(names),
     }
 }

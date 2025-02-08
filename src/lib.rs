@@ -11,6 +11,7 @@ pub mod git_objects;
 pub mod git_repository;
 pub mod utils;
 
+use git_index::IndexEntry;
 use git_objects::*;
 use git_repository::GitRepository;
 use indexmap::IndexMap;
@@ -317,4 +318,44 @@ pub fn cmd_rm(names: Vec<String>, delete: bool) {
             let _ = fs::remove_file(repo.worktree.join(name));
         });
     }
+}
+
+pub fn cmd_add(names: Vec<String>) {
+    cmd_rm(names.clone(), false);
+    let repo = get_repo();
+    let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
+    let mut index = Vec::new();
+    index_buf.read_to_end(&mut index).unwrap();
+    let mut parsed_index = index_parse(index.to_vec());
+    names.iter().for_each(|entry| {
+        let data = fs::read(entry).expect("Failed to read object");
+        let obj = GitObject::Blob(GitBlob::new(data));
+        let sha = object_write(None, obj);
+        println!("{:?}", sha);
+        let metadata = fs::metadata(entry).expect("Failed to read file metadata");
+
+        let index_entry = IndexEntry {
+            ctime: (metadata.ctime() as u32),
+            ctime_n: (metadata.ctime_nsec() % 1_000_000_000) as u32,
+            mtime: (metadata.mtime() as u32),
+            mtime_n: (metadata.mtime_nsec() % 1_000_000_000) as u32,
+            device: metadata.dev() as u32,
+            ino: metadata.ino() as u32,
+            mode_type: 0b1000,
+            mode_perms: 0o644,
+            uid: metadata.uid() as u32,
+            gid: metadata.gid() as u32,
+            size: metadata.size() as u32,
+            sha,
+            path: entry.to_string(),
+            assume_valid: false,
+            stage: 0,
+            name_length: entry.len() as u16,
+        };
+        parsed_index.push(index_entry);
+    });
+    let new_index = write_index(parsed_index);
+    let _ = File::create(repo.repo_path("index"))
+        .unwrap()
+        .write_all(&new_index);
 }
