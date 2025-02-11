@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs::{self, exists, File};
 use std::io::{BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub enum FindObjectErrors {
@@ -137,6 +137,14 @@ pub fn parse_key_value(
     hash_map: &mut IndexMap<String, String>,
 ) -> &mut IndexMap<String, String> {
     let mut hash_map: &mut IndexMap<String, String> = hash_map;
+
+    if raw[0] == 10 && raw.iter().filter(|&n| *n == 10).count() == 1 || raw[0..2] == [10, 10] {
+        hash_map.insert(
+            "message".to_string(),
+            String::from_utf8(raw).unwrap().trim().to_string(),
+        );
+        return hash_map;
+    }
 
     let space = raw.iter().position(|&r| r == 32);
     let new_line = raw.iter().position(|&r| r == 10);
@@ -675,9 +683,122 @@ pub fn write_index(index: Vec<IndexEntry>) -> Vec<u8> {
     buffer
 }
 
+#[derive(Debug, Clone)]
+enum ContentsEntry {
+    IndexEntry(IndexEntry),
+    Dir((String, String)),
+}
+
+pub fn index_to_tree(repo: &GitRepository, index: Vec<IndexEntry>) -> String {
+    let mut contents: HashMap<String, Vec<ContentsEntry>> = HashMap::new();
+    contents.insert("".to_string(), Vec::new());
+
+    index.iter().for_each(|entry| {
+        let dirname = PathBuf::from(entry.path.clone())
+            .parent()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+
+        let mut key = dirname.clone();
+        while !key.is_empty() {
+            println!("{:?}", key);
+            if !contents.contains_key(&key) {
+                contents.insert(key.clone(), Vec::new());
+            }
+            key = PathBuf::from(key)
+                .parent()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+        }
+        contents
+            .get_mut(&dirname)
+            .unwrap()
+            .push(ContentsEntry::IndexEntry(entry.clone()));
+    });
+
+    let cloned_contents = contents.clone();
+    let mut keys: Vec<&String> = cloned_contents.keys().collect();
+    keys.sort_by(|a, b| b.len().cmp(&a.len()));
+
+    let mut sha = String::new();
+    keys.iter().for_each(|path| {
+        let mut tree_leafs: Vec<TreeLeaf> = Vec::new();
+
+        contents
+            .get(path.to_owned())
+            .unwrap()
+            .iter()
+            .for_each(|entry| {
+                let leaf = match entry {
+                    ContentsEntry::IndexEntry(blob) => {
+                        let leaf_mode =
+                            format!("{:02o}{:04o}", blob.mode_type, blob.mode_perms).into_bytes();
+                        TreeLeaf {
+                            mode: leaf_mode,
+                            path: PathBuf::from(blob.path.clone())
+                                .file_name()
+                                .unwrap()
+                                .to_str()
+                                .unwrap()
+                                .to_owned(),
+                            sha: blob.sha.clone(),
+                        }
+                    }
+                    ContentsEntry::Dir(dir) => TreeLeaf {
+                        mode: [48, 52, 48, 48, 48, 48].to_vec(),
+                        path: dir.0.clone(),
+                        sha: dir.1.clone(),
+                    },
+                };
+                tree_leafs.push(leaf);
+            });
+
+        let serialized_tree = write_tree(tree_leafs);
+        let tree = GitTree::new(serialized_tree);
+        sha = object_write(Some(repo.clone()), GitObject::Tree(tree));
+
+        let parent = PathBuf::from(path)
+            .parent()
+            .unwrap_or_else(|| Path::new(""))
+            .to_str()
+            .unwrap()
+            .to_string();
+        let base = PathBuf::from(path)
+            .file_name()
+            .map(Path::new)
+            .unwrap_or_else(|| Path::new(""))
+            .to_str()
+            .unwrap()
+            .to_string();
+        contents
+            .get_mut(&parent)
+            .unwrap()
+            .push(ContentsEntry::Dir((base, sha.clone())));
+    });
+
+    sha
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn get_raw_tree() -> Vec<u8> {
+        vec![
+            49, 48, 48, 54, 52, 52, 32, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0, 234,
+            140, 75, 247, 243, 95, 111, 119, 247, 93, 146, 173, 140, 232, 52, 159, 110, 129, 221,
+            186, 49, 48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 108, 111, 99, 107, 0, 243,
+            100, 243, 179, 113, 104, 107, 102, 32, 143, 87, 114, 225, 165, 0, 96, 70, 26, 219, 139,
+            49, 48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 116, 111, 109, 108, 0, 223, 232,
+            90, 134, 224, 230, 147, 79, 207, 188, 65, 197, 93, 245, 33, 236, 191, 249, 215, 111,
+            52, 48, 48, 48, 48, 32, 115, 114, 99, 0, 160, 54, 249, 54, 81, 75, 136, 212, 255, 203,
+            151, 175, 117, 184, 187, 77, 86, 177, 133, 50,
+        ]
+    }
 
     fn get_index_entries_fixture() -> Vec<IndexEntry> {
         vec![
@@ -733,22 +854,8 @@ mod tests {
         ]
     }
 
-    #[test]
-    fn calculates_hash() {
-        let obj = GitObject::Blob(GitBlob::new(vec![116, 101, 115, 116]));
-        let hash = object_write(None, obj);
-        assert_eq!(hash, "30d74d258442c7c65512eafab474568dd706c430".to_string());
-    }
-    #[test]
-    fn read_raw_object() {
-        let obj = object_read(vec![98, 108, 111, 98, 32, 52, 00, 116, 101, 115, 116]); // blob 4.test
-        println!("{:?}", obj.deserialize());
-        assert_eq!(obj.deserialize(), vec![116, 101, 115, 116]); //test
-    }
-
-    #[test]
-    fn parses_commit_with_pgp_signature() {
-        let raw = String::from(
+    fn get_commit_with_pgp_sig() -> String {
+        String::from(
             "tree 29ff16c9c14e2652b22f8b78bb08a5a07930c147
 parent 206941306e8a8af65b66eaaaea388a7ae24d49a0
 author Thibault Polge <thibault@thb.lt> 1527025023 +0200
@@ -772,8 +879,24 @@ gpgsig -----BEGIN PGP SIGNATURE-----
 
 Create first draft",
         )
-        .as_bytes()
-        .to_vec();
+    }
+
+    #[test]
+    fn calculates_hash() {
+        let obj = GitObject::Blob(GitBlob::new(vec![116, 101, 115, 116]));
+        let hash = object_write(None, obj);
+        assert_eq!(hash, "30d74d258442c7c65512eafab474568dd706c430".to_string());
+    }
+    #[test]
+    fn read_raw_object() {
+        let obj = object_read(vec![98, 108, 111, 98, 32, 52, 00, 116, 101, 115, 116]); // blob 4.test
+        println!("{:?}", obj.deserialize());
+        assert_eq!(obj.deserialize(), vec![116, 101, 115, 116]); //test
+    }
+
+    #[test]
+    fn parses_commit_with_pgp_signature() {
+        let raw = get_commit_with_pgp_sig().as_bytes().to_vec();
 
         let mut expected: IndexMap<String, String> = IndexMap::new();
         expected.insert(
@@ -815,7 +938,7 @@ parent 206941306e8a8af65b66eaaaea388a7ae24d49a0
 author Thibault Polge <thibault@thb.lt> 1527025023 +0200
 committer Thibault Polge <thibault@thb.lt> 1527025044 +0200
 
-Create first draft",
+Create",
         )
         .as_bytes()
         .to_vec();
@@ -837,7 +960,7 @@ Create first draft",
             "committer".to_string(),
             "Thibault Polge <thibault@thb.lt> 1527025044 +0200".to_string(),
         );
-        expected.insert("message".to_string(), "Create first draft".to_string());
+        expected.insert("message".to_string(), "Create".to_string());
 
         let mut index_map = IndexMap::new();
         let result = parse_key_value(raw, &mut index_map);
@@ -873,30 +996,7 @@ Create first draft",
         input.insert("message".to_string(), "Create first draft".to_string());
 
         let result = write_key_value(input.clone());
-        let expected = String::from(
-            "tree 29ff16c9c14e2652b22f8b78bb08a5a07930c147
-parent 206941306e8a8af65b66eaaaea388a7ae24d49a0
-author Thibault Polge <thibault@thb.lt> 1527025023 +0200
-committer Thibault Polge <thibault@thb.lt> 1527025044 +0200
-gpgsig -----BEGIN PGP SIGNATURE-----
-
- iQIzBAABCAAdFiEExwXquOM8bWb4Q2zVGxM2FxoLkGQFAlsEjZQACgkQGxM2FxoL
- kGQdcBAAqPP+ln4nGDd2gETXjvOpOxLzIMEw4A9gU6CzWzm+oB8mEIKyaH0UFIPh
- rNUZ1j7/ZGFNeBDtT55LPdPIQw4KKlcf6kC8MPWP3qSu3xHqx12C5zyai2duFZUU
- wqOt9iCFCscFQYqKs3xsHI+ncQb+PGjVZA8+jPw7nrPIkeSXQV2aZb1E68wa2YIL
- 3eYgTUKz34cB6tAq9YwHnZpyPx8UJCZGkshpJmgtZ3mCbtQaO17LoihnqPn4UOMr
- V75R/7FjSuPLS8NaZF4wfi52btXMSxO/u7GuoJkzJscP3p4qtwe6Rl9dc1XC8P7k
- NIbGZ5Yg5cEPcfmhgXFOhQZkD0yxcJqBUcoFpnp2vu5XJl2E5I/quIyVxUXi6O6c
- /obspcvace4wy8uO0bdVhc4nJ+Rla4InVSJaUaBeiHTW8kReSFYyMmDCzLjGIu1q
- doU61OM3Zv1ptsLu3gUE6GU27iWYj2RWN3e3HE4Sbd89IFwLXNdSuM0ifDLZk7AQ
- WBhRhipCCgZhkj9g2NEk7jRVslti1NdN5zoQLaJNqSwO1MtxTmJ15Ksk3QP6kfLB
- Q52UWybBzpaP9HEd4XnR+HuQ4k2K0ns2KgNImsNvIyFwbpMUyUWLMPimaV1DWUXo
- 5SBjDB/V/W2JBFR+XKHFJeFwYhj7DD/ocsGr4ZMx/lgc8rjIBkI=
- =lgTX
- -----END PGP SIGNATURE-----
-
-Create first draft",
-        );
+        let expected = get_commit_with_pgp_sig();
         println!("{}", result);
         println!("{}", expected);
         assert_eq!(expected, result);
@@ -921,16 +1021,7 @@ Create first draft",
 
     #[test]
     fn parses_tree() {
-        let raw = vec![
-            49, 48, 48, 54, 52, 52, 32, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0, 234,
-            140, 75, 247, 243, 95, 111, 119, 247, 93, 146, 173, 140, 232, 52, 159, 110, 129, 221,
-            186, 49, 48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 108, 111, 99, 107, 0, 243,
-            100, 243, 179, 113, 104, 107, 102, 32, 143, 87, 114, 225, 165, 0, 96, 70, 26, 219, 139,
-            49, 48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 116, 111, 109, 108, 0, 223, 232,
-            90, 134, 224, 230, 147, 79, 207, 188, 65, 197, 93, 245, 33, 236, 191, 249, 215, 111,
-            52, 48, 48, 48, 48, 32, 115, 114, 99, 0, 160, 54, 249, 54, 81, 75, 136, 212, 255, 203,
-            151, 175, 117, 184, 187, 77, 86, 177, 133, 50,
-        ];
+        let raw = get_raw_tree();
         let result = parse_tree(raw);
         let expected = TreeLeaf {
             mode: vec![49, 48, 48, 54, 52, 52],
@@ -957,16 +1048,7 @@ Create first draft",
 
     #[test]
     fn writes_tree() {
-        let raw = vec![
-            49, 48, 48, 54, 52, 52, 32, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0, 234,
-            140, 75, 247, 243, 95, 111, 119, 247, 93, 146, 173, 140, 232, 52, 159, 110, 129, 221,
-            186, 49, 48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 108, 111, 99, 107, 0, 243,
-            100, 243, 179, 113, 104, 107, 102, 32, 143, 87, 114, 225, 165, 0, 96, 70, 26, 219, 139,
-            49, 48, 48, 54, 52, 52, 32, 67, 97, 114, 103, 111, 46, 116, 111, 109, 108, 0, 223, 232,
-            90, 134, 224, 230, 147, 79, 207, 188, 65, 197, 93, 245, 33, 236, 191, 249, 215, 111,
-            52, 48, 48, 48, 48, 32, 115, 114, 99, 0, 160, 54, 249, 54, 81, 75, 136, 212, 255, 203,
-            151, 175, 117, 184, 187, 77, 86, 177, 133, 50,
-        ];
+        let raw = get_raw_tree();
         let leaf = TreeLeaf {
             mode: vec![49, 48, 48, 54, 52, 52],
             path: ".gitignore".to_string(),
@@ -1015,48 +1097,14 @@ Create first draft",
         // let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
         // let mut index = Vec::new();
         // index_buf.read_to_end(&mut index).unwrap();
-        let index = [
-            68, 73, 82, 67, 0, 0, 0, 2, 0, 0, 0, 8, 103, 114, 253, 213, 35, 26, 190, 59, 103, 50,
-            25, 13, 35, 26, 190, 59, 0, 1, 3, 6, 0, 2, 7, 121, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0,
-            3, 232, 0, 0, 0, 8, 234, 140, 75, 247, 243, 95, 111, 119, 247, 93, 146, 173, 140, 232,
-            52, 159, 110, 129, 221, 186, 0, 10, 46, 103, 105, 116, 105, 103, 110, 111, 114, 101, 0,
-            0, 0, 0, 0, 0, 0, 0, 103, 114, 253, 213, 56, 138, 91, 4, 103, 76, 94, 234, 56, 138, 91,
-            4, 0, 1, 3, 6, 0, 1, 249, 176, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 49,
-            196, 243, 100, 243, 179, 113, 104, 107, 102, 32, 143, 87, 114, 225, 165, 0, 96, 70, 26,
-            219, 139, 0, 10, 67, 97, 114, 103, 111, 46, 108, 111, 99, 107, 0, 0, 0, 0, 0, 0, 0, 0,
-            103, 114, 253, 213, 0, 130, 233, 115, 103, 76, 94, 234, 0, 130, 233, 115, 0, 1, 3, 6,
-            0, 1, 243, 181, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 0, 218, 223, 232, 90,
-            134, 224, 230, 147, 79, 207, 188, 65, 197, 93, 245, 33, 236, 191, 249, 215, 111, 0, 10,
-            67, 97, 114, 103, 111, 46, 116, 111, 109, 108, 0, 0, 0, 0, 0, 0, 0, 0, 103, 124, 3,
-            172, 40, 208, 129, 140, 103, 124, 3, 172, 40, 208, 129, 140, 0, 1, 3, 6, 0, 2, 131, 74,
-            0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 12, 131, 101, 227, 253, 60, 10, 69,
-            22, 8, 68, 235, 230, 149, 122, 125, 221, 210, 106, 120, 12, 102, 0, 18, 115, 114, 99,
-            47, 103, 105, 116, 95, 111, 98, 106, 101, 99, 116, 115, 46, 114, 115, 0, 0, 0, 0, 0, 0,
-            0, 0, 103, 114, 253, 213, 34, 91, 16, 105, 103, 109, 96, 74, 34, 91, 16, 105, 0, 1, 3,
-            6, 0, 1, 244, 132, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 5, 10, 162, 80,
-            131, 251, 42, 95, 218, 181, 173, 68, 165, 211, 21, 159, 48, 35, 225, 182, 79, 129, 0,
-            21, 115, 114, 99, 47, 103, 105, 116, 95, 114, 101, 112, 111, 115, 105, 116, 111, 114,
-            121, 46, 114, 115, 0, 0, 0, 0, 0, 103, 125, 121, 225, 33, 37, 90, 77, 103, 125, 121,
-            225, 32, 242, 125, 80, 0, 1, 3, 6, 0, 2, 147, 242, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0,
-            3, 232, 0, 0, 21, 136, 81, 41, 243, 66, 140, 184, 137, 4, 113, 156, 138, 32, 164, 21,
-            40, 195, 227, 101, 149, 212, 0, 10, 115, 114, 99, 47, 108, 105, 98, 46, 114, 115, 0, 0,
-            0, 0, 0, 0, 0, 0, 103, 124, 51, 72, 48, 63, 202, 116, 103, 124, 51, 72, 48, 63, 202,
-            116, 0, 1, 3, 6, 0, 2, 141, 148, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 6,
-            172, 159, 27, 174, 168, 104, 141, 73, 139, 1, 172, 191, 250, 141, 225, 254, 36, 142,
-            190, 183, 75, 0, 11, 115, 114, 99, 47, 109, 97, 105, 110, 46, 114, 115, 0, 0, 0, 0, 0,
-            0, 0, 103, 124, 50, 35, 14, 237, 231, 69, 103, 124, 50, 35, 14, 237, 231, 69, 0, 1, 3,
-            6, 0, 2, 72, 22, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 107, 27, 69, 111,
-            235, 5, 85, 57, 182, 87, 57, 68, 113, 125, 61, 124, 198, 171, 61, 48, 224, 60, 0, 12,
-            115, 114, 99, 47, 117, 116, 105, 108, 115, 46, 114, 115, 0, 0, 0, 0, 0, 0, 84, 82, 69,
-            69, 0, 0, 0, 53, 0, 56, 32, 49, 10, 26, 26, 190, 178, 240, 123, 115, 252, 204, 178,
-            153, 20, 123, 49, 235, 228, 9, 14, 230, 212, 115, 114, 99, 0, 53, 32, 48, 10, 198, 157,
-            1, 10, 221, 192, 235, 114, 46, 157, 124, 137, 122, 90, 117, 227, 171, 53, 136, 115,
-            100, 134, 180, 179, 215, 165, 49, 185, 158, 173, 100, 117, 100, 254, 167, 214, 148, 21,
-            106, 209,
+        let raw = [
+            103, 114, 253, 213, 35, 26, 190, 59, 103, 50, 25, 13, 35, 26, 190, 59, 0, 1, 3, 6, 0,
+            2, 7, 121, 0, 0, 129, 164, 0, 0, 3, 232, 0, 0, 3, 232, 0, 0, 0, 8, 234, 140, 75, 247,
+            243, 95, 111, 119, 247, 93, 146, 173, 140, 232, 52, 159, 110, 129, 221, 186, 0, 10, 46,
+            103, 105, 116, 105, 103, 110, 111, 114, 101,
         ];
-        let raw = index[12..84].to_vec();
 
-        let (result, _) = index_entry_parse(raw);
+        let (result, _) = index_entry_parse(raw.to_vec());
 
         let expected = IndexEntry {
             ctime: 1735589333,

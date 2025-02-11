@@ -13,7 +13,7 @@ pub enum RepoErrors {
 pub struct GitRepository {
     pub worktree: PathBuf,
     gitdir: PathBuf,
-    config: Option<Ini>,
+    pub config: Option<Ini>,
 }
 
 impl GitRepository {

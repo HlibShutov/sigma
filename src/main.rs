@@ -58,6 +58,10 @@ enum Commands {
     Add {
         names: Vec<String>,
     },
+    Commit {
+        #[arg(default_value = "hej")]
+        message: String,
+    },
 }
 
 fn main() {
@@ -87,5 +91,6 @@ fn main() {
         Commands::Status => cmd_status(),
         Commands::Rm { names, delete } => cmd_rm(names, delete),
         Commands::Add { names } => cmd_add(names),
+        Commands::Commit { message } => cmd_commit(message),
     }
 }

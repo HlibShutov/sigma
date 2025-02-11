@@ -11,10 +11,13 @@ pub mod git_objects;
 pub mod git_repository;
 pub mod utils;
 
+use chrono::DateTime;
+use chrono::Local;
 use git_index::IndexEntry;
 use git_objects::*;
 use git_repository::GitRepository;
 use indexmap::IndexMap;
+use ini::Ini;
 use utils::*;
 
 use crate::git_repository::RepoErrors;
@@ -330,7 +333,7 @@ pub fn cmd_add(names: Vec<String>) {
     names.iter().for_each(|entry| {
         let data = fs::read(entry).expect("Failed to read object");
         let obj = GitObject::Blob(GitBlob::new(data));
-        let sha = object_write(None, obj);
+        let sha = object_write(Some(repo.clone()), obj);
         println!("{:?}", sha);
         let metadata = fs::metadata(entry).expect("Failed to read file metadata");
 
@@ -358,4 +361,61 @@ pub fn cmd_add(names: Vec<String>) {
     let _ = File::create(repo.repo_path("index"))
         .unwrap()
         .write_all(&new_index);
+}
+
+pub fn cmd_commit(message: String) {
+    let repo = get_repo();
+    let mut index_buf = BufReader::new(File::open(repo.repo_path("index")).unwrap());
+    let mut index = Vec::new();
+    index_buf.read_to_end(&mut index).unwrap();
+    let parsed_index = index_parse(index.to_vec());
+
+    let sha = index_to_tree(&repo, parsed_index);
+    println!("{:?}", sha);
+
+    let config_path = format!("{}/.gitconfig", env::var("HOME").unwrap());
+    let config_file = Ini::load_from_file(config_path).unwrap();
+    let user = config_file.section(Some("user")).unwrap();
+    let user_info = format!(
+        "{} <{}>",
+        user.get("name").unwrap(),
+        user.get("email").unwrap()
+    );
+
+    let mut commit: IndexMap<String, String> = IndexMap::new();
+    commit.insert("tree".to_string(), sha);
+
+    if !find_object("HEAD".to_string()).is_empty() {
+        commit.insert("parent".to_string(), find_object("HEAD".to_string()));
+    }
+
+    let timestamp: DateTime<Local> = Local::now();
+
+    let offset = timestamp.offset().utc_minus_local();
+    let hours = offset / 3600;
+    let minutes = (offset % 3600) / 60;
+
+    let tz = format!(
+        "{}{:02}{:02}",
+        if offset >= 0 { "-" } else { "+" },
+        hours.abs(),
+        minutes.abs()
+    );
+
+    let user_time_info = format!("{} {} {}", user_info, timestamp.timestamp(), tz);
+    commit.insert("author".to_string(), format!("{}", user_time_info));
+    commit.insert("committer".to_string(), format!("{}", user_time_info));
+    commit.insert("message".to_string(), message);
+
+    let commit_serialized = write_key_value(commit);
+    let commit = GitCommit::new(commit_serialized.into_bytes());
+    println!("{:?}", commit.kv);
+    let commit_sha = object_write(Some(repo.clone()), GitObject::Commit(commit));
+    println!("{:?}", commit_sha);
+    let content = fs::read(repo.repo_path("HEAD")).unwrap();
+    let active_branch = String::from_utf8(content[5..].to_vec()).unwrap();
+    let active_branch_path = repo.repo_path(active_branch.trim());
+    let _ = File::create(active_branch_path)
+        .unwrap()
+        .write_all(commit_sha.as_bytes());
 }
